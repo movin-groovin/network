@@ -41,13 +41,13 @@ public:
 
 class CTask;
 
-class CTaskList {
+class CTaskMap {
 private:
 	pthread_mutex_t m_syncQueue;
 	std::unordered_map <pthread_t, std::shared_ptr <CTask> > m_tskQueue;
 	
 public:
-	CTaskList () {
+	CTaskMap () {
 		int ret;
 		
 		if ((ret = pthread_mutex_init (&m_syncQueue, NULL)) != 0) {
@@ -57,7 +57,7 @@ public:
 		return;
 	}
 	
-	~CTaskList () {
+	~CTaskMap () {
 		pthread_mutex_destroy (&m_syncQueue);
 	}
 	
@@ -135,11 +135,56 @@ public:
 };
 
 
+typedef struct _COND_DATA {
+	pthread_mutex_t syncMut;
+	pthread_cond_t syncCond;
+	
+	_SIGWAIT_DATA () {
+		int ret;
+		std::istringstream issCnv;
+		
+		if ((ret = pthread_mutex_init (&syncMut, NULL)) != 0) {
+			issCnv << ret;
+			throw CException ("Error of pthread_mutex_init, description: " + 
+							  StrError (ret) + "; code: " + issCnv.str () + "\n"
+			);
+		}
+		if ((ret = pthread_cond_init (&syncCond, NULL)) != 0) {
+			pthread_mutex_destroy (&syncMut);
+			issCnv << ret;
+			throw CException ("Error of pthread_cond_init, description: " + 
+							  StrError (ret) + "; code: " + issCnv.str () + "\n"
+			);
+		}
+		
+		return;
+	}
+	~ SIGWAIT_DATA () {
+		pthread_mutex_destroy (&syncMut);
+		pthread_cond_destroy (&syncCond);
+	}
+	
+} SIGWAIT_DATA, *PSIGWAIT_DATA;
+
+
+typedef struct _FLAGS_DATA {
+	bool reread;
+	bool terminate;
+	
+	_FLAGS_DATA () {
+		reread = terminate = false;
+	}
+} FLAGS_DATA, *PFLAGS_DATA;
+
 
 //
 // Typedef declaration
 //
 typedef typename CTask::ParamPars ShpParams;
+typedef std::shred_ptr <SIGWAIT_DATA> ShpSigwait;
+typedef std::shared_ptr <CTask> ShpTask;
+typedef std::shared_ptr <CTaskMap> ShpTskMap;
+
 
 
 #endif // NETWORK_SERVER_OWN

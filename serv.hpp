@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <exception>
 #include <vector>
+#include <fstream>
 
 #include <sys/types.h>
 #include <sys/socket.h>

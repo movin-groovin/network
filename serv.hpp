@@ -77,7 +77,7 @@ public:
 
 typedef struct _TASK_PARAMETERS {
 public:
-	_TASK_PARAMETERS (): sock (0) {}
+	_TASK_PARAMETERS (int sck = 0): sock (sck) {}
 
 public:
 	int sock;
@@ -93,15 +93,14 @@ private:
 	void *argPtr;
 
 protected:
-	CTask (ParamPars pars): m_tskParams (pars), argPtr (NULL) {}
+	CTask (ParamPars pars, void *arg = NULL): m_tskParams (pars), argPtr (arg) {}
 	
 public:
 	virtual ~CTask () {}
-	int Start (pthread_t *thread, const pthread_attr_t *attr, void *arg) {
+	int Start (pthread_t *thread, const pthread_attr_t *attr) {
 		int ret;
 		
 		// here in WorkerFunction *p and *arg are equal
-		argPtr = arg;
 		ret = pthread_create (thread,
 							  attr,
 							  &CallFunc,
@@ -135,12 +134,12 @@ public:
 	
 };
 
-
+/*
 typedef struct _COND_DATA {
 	pthread_mutex_t syncMut;
 	pthread_cond_t syncCond;
 	
-	_SIGWAIT_DATA () {
+	_COND_DATA () {
 		int ret;
 		std::istringstream issCnv;
 		
@@ -160,20 +159,49 @@ typedef struct _COND_DATA {
 		
 		return;
 	}
-	~ SIGWAIT_DATA () {
+	~ _COND_DATA () {
 		pthread_mutex_destroy (&syncMut);
 		pthread_cond_destroy (&syncCond);
 	}
 	
-} SIGWAIT_DATA, *PSIGWAIT_DATA;
+} COND_DATA, *PCOND_DATA;
+*/
 
-
-typedef struct _FLAGS_DATA {
-	bool reread;
-	bool terminate;
+typedef class _FLAGS_DATA {
+	pthread_spinlock_t m_guard;
+	bool m_term, m_reread;
 	
 	_FLAGS_DATA () {
-		reread = terminate = false;
+		pthread_spin_init (&m_guard, 0);
+	}
+	~ _FLAGS_DATA () {
+		pthread_spin_destroy (&m_guard);
+	}
+	
+	bool CheckReread () const {
+		bool tmp;
+		pthread_spin_lock (&m_guard);
+		tmp = m_reread;
+		pthread_spin_unlock (&m_guard);
+		return tmp;
+	}
+	void SetReread (bool val) {
+		pthread_spin_lock (&m_guard);
+		m_reread = val;
+		pthread_spin_unlock (&m_guard);
+	}
+	
+	bool CheckTerm () const {
+		bool tmp;
+		pthread_spin_lock (&m_guard);
+		tmp = m_term;
+		pthread_spin_unlock (&m_guard);
+		return tmp;
+	}
+	void SetTerm (bool val) {
+		pthread_spin_lock (&m_guard);
+		m_term = val;
+		pthread_spin_unlock (&m_guard);
 	}
 } FLAGS_DATA, *PFLAGS_DATA;
 
@@ -182,7 +210,7 @@ typedef struct _FLAGS_DATA {
 // Typedef declaration
 //
 typedef typename CTask::ParamPars ShpParams;
-typedef std::shred_ptr <SIGWAIT_DATA> ShpSigwait;
+//typedef std::shred_ptr <COND_DATA> ShpCondWait;
 typedef std::shared_ptr <CTask> ShpTask;
 typedef std::shared_ptr <CTaskMap> ShpTskMap;
 

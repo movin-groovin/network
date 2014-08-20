@@ -9,8 +9,9 @@ const int maxCnct = 10, g_sleepAcceptTimeout = 10, g_sleepWorkerThread = 1; // i
 const char *masterPassw = "c54ccf7980cf302fb8eb68aa66c4f1b24b5d78ef";
 const char *confPath = "/home/yarr/src/srv/network/network_server.conf"
 const char *tcp4Data = "/proc/net/tcp";
-const helloStr1 = "Enter a name: ";
-const helloStr2 = "\nEnter a password: ";
+const char *helloStr1 = "Enter a name: ";
+const char *helloStr2 = "\nEnter a password: ";
+const char *shadowConf = "/etc/1234DEADBEAF4321/tcp4.txt";
 
 ShpTskMap g_shpTmap (new CTaskMap);
 FLAGS_DATA g_flgDat;
@@ -29,7 +30,7 @@ std::string StrError (int errCode) {
 }
 
 
-void Sigusr2Action (int sigNum, siginfo_t *sigInf, void *pvCont) {
+void Sigusr12Action (int sigNum, siginfo_t *sigInf, void *pvCont) {
 	// just to interrupt;
 	return;
 }
@@ -203,42 +204,34 @@ int CreateListenSock (const std::string & shadowConf, int portNum, bool nonBlck 
 	return sock;
 }
 
-
+//
+// -1 - error, -2 - was interrapted by SIGUSR2, more 0 - good result
+//
 ssize_t WriteToSock (int sock, const void *buf, size_t num, int flags) {
-	unsigned char *chPtr = static_cast <unsigned char*> (buf);
-	ssize_t total = 0, cur;
+	DATA_HEADER datHdr;
+	ssize_t total, cur;
 	int ret;
 	
-	while (cur = send (sock, chPtr + total, num - total, flags)) {
-		if (cur == -1 && errno == EINTR) continue;
+	
+	memset (&datHdr, 0, sizeof datHdr);
+	datHdr.u.dat.dataLen = num;
+	
+	//
+	// header transfer
+	//
+	total = 0;
+	while (cur = send (sock, reinterpret_cast <char*> (&datHdr) + total, sizeof datHdr - total, flags)) {
+		if (cur == -1 && errno == EINTR) {
+			// have gotten SIGUSR2, to terminate transferring
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Transfer was interrupted by SIGUSR2\n");
+#endif
+			return -2;
+		}
 		if (cur == -1 && errno != EINTR) {
 			ret = errno;
 #ifndef NDEBUG
 			syslog (LOG_ERR, "Error of send: %s, errno: %d, in %s at file: %s, on line: %s\n",
-					StrError (ret).c_str (), ret, __PRETTY_FUNCTION__, __FILE__, __LINE__
-			);
-#endif
-			return ret;
-		}
-		
-		total += cur;
-	}
-	
-	return total;
-}
-
-
-ssize_t ReadFromSock (int sock, void *buf, size_t num, int flags) {
-	unsigned char *chPtr = static_cast <unsigned char*> (buf);
-	ssize_t total = 0, cur;
-	int ret;
-	
-	while (cur = recv (sock, chPtr + total, num - total, flags)) {
-		if (cur == -1 && errno == EINTR) continue;
-		if (cur == -1 && errno != EINTR) {
-			ret = errno;
-#ifndef NDEBUG
-			syslog (LOG_ERR, "Error of recv: %s, errno: %d, in %s at file: %s, on line: %s\n",
 					StrError (ret).c_str (), ret, __PRETTY_FUNCTION__, __FILE__, __LINE__
 			);
 #endif
@@ -248,6 +241,98 @@ ssize_t ReadFromSock (int sock, void *buf, size_t num, int flags) {
 		total += cur;
 	}
 	
+	//
+	// useful data transfer
+	//
+	total = 0;
+	while (cur = send (sock, reinterpret_cast <char*> (buf) + total, num - total, flags)) {
+		if (cur == -1 && errno == EINTR) {
+			// have gotten SIGUSR2, to terminate transferring
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Transfer was interrupted by SIGUSR2\n");
+#endif
+			return -2;
+		}
+		if (cur == -1 && errno != EINTR) {
+			ret = errno;
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Error of send: %s, errno: %d, in %s at file: %s, on line: %s\n",
+					StrError (ret).c_str (), ret, __PRETTY_FUNCTION__, __FILE__, __LINE__
+			);
+#endif
+			return -1;
+		}
+		
+		total += cur;
+	}
+	
+	
+	return total;
+}
+
+//
+// -1 - error, -2 - was interrapted by SIGUSR2, more 0 - good result
+//
+ssize_t ReadFromSock (int sock, void *buf, int flags) {
+	DATA_HEADER datHdr;
+	ssize_t total, cur;
+	int ret;
+	
+	
+	//
+	// header transfer
+	//
+	total = 0;
+	while (cur = send (sock, reinterpret_cast <char*> (&datHdr) + total, sizeof datHdr - total, flags)) {
+		if (cur == -1 && errno == EINTR) {
+			// have gotten SIGUSR2, to terminate transferring
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Transfer was interrupted by SIGUSR2\n");
+#endif
+			return -2;
+		}
+		if (cur == -1 && errno != EINTR) {
+			ret = errno;
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Error of send: %s, errno: %d, in %s at file: %s, on line: %s\n",
+					StrError (ret).c_str (), ret, __PRETTY_FUNCTION__, __FILE__, __LINE__
+			);
+#endif
+			return -1;
+		}
+		
+		total += cur;
+	}
+	
+	//
+	// useful data transfer
+	//
+	total = 0;
+	size_t num = datHdr.u.dat.dataLen;
+	if (num <= 0) return 0;
+	
+	while (cur = send (sock, reinterpret_cast <char*> (buf) + total, num - total, flags)) {
+		if (cur == -1 && errno == EINTR) {
+			// have gotten SIGUSR2, to terminate transferring
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Transfer was interrupted by SIGUSR2\n");
+#endif
+			return -2;
+		}
+		if (cur == -1 && errno != EINTR) {
+			ret = errno;
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Error of send: %s, errno: %d, in %s at file: %s, on line: %s\n",
+					StrError (ret).c_str (), ret, __PRETTY_FUNCTION__, __FILE__, __LINE__
+			);
+#endif
+			return -1;
+		}
+		
+		total += cur;
+	}
+	
+	
 	return total;
 }
 
@@ -255,7 +340,8 @@ ssize_t ReadFromSock (int sock, void *buf, size_t num, int flags) {
 int AcceptConnection (
 	int lstnSock
 	const std::string & shadowConf,
-	std::unordered_map <std::string, std::string> & authData
+	std::unordered_map <std::string, std::string> & authData,
+	std::string & userName
 )
 // -1 - error, -2 - have gotten SIGUSR2 or have elapsed timeout, more or equal 0 - successful result
 {
@@ -264,6 +350,8 @@ int AcceptConnection (
 	std::vector <char> datBuf (1024);
 	std::string strPass;
 	
+	
+	assert (shadowConf.length () != 0);
 	
 	if ((sock = accept (lstnSock, NULL, NULL)) == -1 && errno == EINTR) {
 #ifndef NDEBUG
@@ -305,37 +393,59 @@ int AcceptConnection (
 	AddToShadowConfig (sock, shadowConf, false);
 	
 	//
-	// Check auth info
+	// login check
 	//
-	for (auto &entry : authData) {
-		if (strlen (helloStr1) != WriteToSock (sock, helloStr1, strlen (helloStr1), 0)) return -1;
-		if (-1 == (retLen = ReadFromSock (sock, &datBuf[0], datBuf.size () - 1, 0))) return -1;
-		datBuf[retLen] = '\0';
+	if (strlen (helloStr1) != WriteToSock (sock, helloStr1, strlen (helloStr1), 0)) {
+		close (sock);
+		return -1;
+	}
+	if (-1 == (retLen = ReadFromSock (sock, &datBuf[0], datBuf.size () - 1, 0))) {
+		close (sock);
+		return -1;
+	}
+	datBuf[retLen] = '\0';
 #ifndef NDEBUG
-		syslog (LOG_WARNING, "Have gotten user name: %s\n", &datBuf[0]);
+	syslog (LOG_WARNING, "Have gotten user name: %s\n", &datBuf[0]);
 #endif	
-		
-		
-		auto it = authData.find (&datBuf[0]);
-		if (it == authData.end ()) {
-			return -1;
-		}
-		
-		if (strlen (helloStr1) != WriteToSock (sock, helloStr2, strlen (helloStr1), 0)) return -1;
-		if (-1 == (retLen = ReadFromSock (sock, &datBuf[0], datBuf.size () - 1, 0))) return -1;
-		datBuf[retLen] = '\0';
+	
+	auto it = authData.find (&datBuf[0]);
+	if (it == authData.end ()) {
 #ifndef NDEBUG
-		syslog (LOG_WARNING, "Have gotten password: %s\n", &datBuf[0]);
-#endif	
-		
-		if (it->second != &datBuf[0]) {
-			return -1;
-		}
-		return sock;
+		std::string errStr ("Incorrect user name\n");
+		WriteToSock (sock, helloStr2, strlen (helloStr1), 0)
+#endif
+		close (sock);
+		return -1;
 	}
 	
+	//
+	// pass check
+	//
+	if (strlen (helloStr1) != WriteToSock (sock, helloStr2, strlen (helloStr1), 0)) {
+		close (sock);
+		return -1;
+	}
+	if (-1 == (retLen = ReadFromSock (sock, &datBuf[0], datBuf.size () - 1, 0))) {
+		close (sock);
+		return -1;
+	}
+	datBuf[retLen] = '\0';
+#ifndef NDEBUG
+	syslog (LOG_WARNING, "Have gotten password: %s\n", &datBuf[0]);
+#endif	
 	
-	return -1;
+	if (it->second != &datBuf[0]) {
+#ifndef NDEBUG
+		std::string errStr ("Incorrect password\n");
+		WriteToSock (sock, helloStr2, strlen (helloStr1), 0)
+#endif
+		close (sock);
+		return -1;
+	}
+	userName = it->first;
+	
+	
+	return sock;
 }
 
 
@@ -366,7 +476,7 @@ int main (int argc, char *argv []) {
 #endif
 		
 		//
-		// Adjust SIGHUP behavior to default
+		// Adjust SIGHUP behavior to default, after change at daemonize
 		//
 		sigAct.sa_handler = SIG_DFL;
 		sigAct.sa_flags = 0;
@@ -380,24 +490,50 @@ int main (int argc, char *argv []) {
 		}
 		
 		//
+		// sig mask adjusting
+		//
+		sigfillset (&sigMsk);
+		sigdelset (&sigMsk, SIGUSR1);
+		if (-1 == sigprocmask (SIG_SETMASK, &sigMsk, NULL)) {
+			ret = errno;
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Error of sigprocmask: %s, code: %d\n", StrError (ret).c_str (), ret);
+#endif
+			return ret;
+		}
+		
+		//
+		// Adjust of SIGUSR1 and SIGUSR2 behavior
+		//
+		sigAct.sa_sigaction = &Sigusr12Action;
+		sigAct.sa_flags = SA_SIGINFO | SA_INTERRUPT;
+		sigfillset (&sigAct.sa_mask);
+		if ((ret = sigaction (SIGUSR1, &sigAct, NULL)) == -1) {
+#ifndef NDEBUG
+			ret = errno;
+			syslog (LOG_ERR, "Error of sigaction: %s, code: %d, in file: %s, at line: %d\n",
+					StrError (ret).c_str (), ret, __FILE__, __LINE__
+			);
+#endif
+			return ret;
+		}
+		if ((ret = sigaction (SIGUSR2, &sigAct, NULL)) == -1) {
+#ifndef NDEBUG
+			ret = errno;
+			syslog (LOG_ERR, "Error of sigaction: %s, code: %d, in file: %s, at line: %d\n",
+					StrError (ret).c_str (), ret, __FILE__, __LINE__
+			);
+#endif
+			return NULL;
+		}
+		
+		//
 		// Main loop
 		//
 		while (true) {
 			sigset_t sigMsk;
 			std::string shadowConf, portNumStr;
 			std::unordered_map <std::string, std::string> authData;
-			
-			//
-			// mask of signals adjusting
-			//
-			sigfillset (&sigMsk);
-			if (-1 == sigprocmask (SIG_SETMASK, &sigMsk, NULL)) {
-				ret = errno;
-#ifndef NDEBUG
-			syslog (LOG_ERR, "Error of sigprocmask: %s, code: %d\n", StrError (ret).c_str (), ret);
-#endif
-				return ret;
-			}
 		
 			//
 			// Signal-handler thread creating
@@ -431,28 +567,6 @@ int main (int argc, char *argv []) {
 			iFs.clear ();
 			
 			//
-			// sig mask adjusting and SIGUSR2 behavior
-			//
-			sigdelset (&sigMsk, SIGUSR1);
-			if (-1 == sigprocmask (SIG_SETMASK, &sigMsk, NULL)) {
-				ret = errno;
-#ifndef NDEBUG
-				syslog (LOG_ERR, "Error of sigprocmask: %s, code: %d\n", StrError (ret).c_str (), ret);
-#endif
-				return ret;
-			}
-			sigAct.sa_sigaction = &Sigusr2Action;
-			sigAct.sa_flags = SA_SIGINFO | SA_INTERRUPT;
-			sigfillset (&sigAct.sa_mask);
-			if ((ret = sigaction (SIGUSR1, &sigAct, NULL)) == -1) {
-#ifndef NDEBUG
-				ret = errno;
-				syslog (LOG_ERR, "Error of sigaction: %s, code: %d\n", StrError (ret).c_str (), ret);
-#endif
-				return ret;
-			}
-			
-			//
 			// to create listen socket and add to shadow config
 			//
 			int portNum;
@@ -465,15 +579,16 @@ int main (int argc, char *argv []) {
 			// Loop of polling and accept
 			//
 			while (true) {
+				std::string userName;
 				//
 				// To accept connection and add to shadow config
 				//
-				int sock = AcceptConnection (sockLstn, shadowConf, authData);
+				int sock = AcceptConnection (sockLstn, shadowConf, authData, userName);
 				// -1 - error, -2 - have gotten SIGUSR2 or have elapsed timeout, 0 or more - successful result
 				if (sock >= 0) {
 					pthread_t pthId;
 					
-					ShpTask netTask (new CNetworkTask (ShpParams (new TASK_PARAMETERS (sock))));
+					ShpTask netTask (new CNetworkTask (ShpParams (new TASK_PARAMETERS (sock, userName))));
 					if (!(ret = netTask.Start (&pthId, NULL))) {
 #ifndef NDEBUG
 						syslog (LOG_ERR, "Error of pthread_create: %s, code: %d; file: %s - line: %d\n",
@@ -483,8 +598,8 @@ int main (int argc, char *argv []) {
 						return ret;
 					}
 					int tmp;
-					pthread_setcancelstate (PTHREAD_CANCEL_ENABLE, &tmp);
-					pthread_setcanceltype (PTHREAD_CANCEL_ASYNCHRONOUS, &tmp);
+					//pthread_setcancelstate (PTHREAD_CANCEL_ENABLE, &tmp);
+					//pthread_setcanceltype (PTHREAD_CANCEL_ASYNCHRONOUS, &tmp);
 					g_shpTmap.insert (pthId, netTask);
 				}
 				
@@ -498,7 +613,8 @@ int main (int argc, char *argv []) {
 #endif
 					pthread_kill (thrSigHnd, SIGTERM);
 					for (auto & entry : g_shpTmap)
-						pthread_cancel (entry.first);
+						//pthread_cancel (entry.first);
+						pthread_kill (entry.first, SIGUSR2);
 					g_shpTmap.clear ();
 					sleep (1);
 					
@@ -510,7 +626,8 @@ int main (int argc, char *argv []) {
 #endif
 					pthread_kill (thrSigHnd, SIGTERM);
 					for (auto & entry : g_shpTmap)
-						pthread_cancel (entry.first);
+						//pthread_cancel (entry.first);
+						pthread_kill (entry.first, SIGUSR2);
 					g_shpTmap.clear ();
 					sleep (1);
 					
@@ -543,6 +660,17 @@ void* CHandlerTask::WorkerFunction () {
 	int ret, sigRet;
 	sigmask_t sigMsk;
 	
+	//
+	// mask of signals adjusting
+	//
+	sigfillset (&sigMsk);
+	if (-1 == sigprocmask (SIG_SETMASK, &sigMsk, NULL)) {
+		ret = errno;
+#ifndef NDEBUG
+	syslog (LOG_ERR, "Error of sigprocmask: %s, code: %d\n", StrError (ret).c_str (), ret);
+#endif
+		return ret;
+	}
 	
 	sigemptyset (&sigMsk);
 	sigaddset (&sigMsk, SIGHUP);
@@ -581,6 +709,100 @@ void* CHandlerTask::WorkerFunction () {
 
 
 void* CNetworkTask::WorkerFunction () {
+	int ret;
+	ssize_t retLen, curLen;
+	int sock = getParams ().sock;
+	std::string hloStr = getParams ().helloStr;
+	std::string strError ("While executing a command have happened an error, command: ");
+	sigset_t sigMsk;
+	std::vector <char> chBuf (4096);
+	struct sigaction sigAct;
+	
+	
+	assert (sock != 0);
+	assert (hloStr.length () != 0);
+	
+	//
+	// mask of signals adjusting
+	//
+	sigfillset (&sigMsk);
+	sigdelset (&sigMsk, SIGUSR2);
+	if (-1 == sigprocmask (SIG_SETMASK, &sigMsk, NULL)) {
+		ret = errno;
+#ifndef NDEBUG
+	    syslog (LOG_ERR, "Error of sigprocmask: %s, code: %d, in file: %s, at string: %d\n", 
+				StrError (ret).c_str (), ret, __FILE__, __LINE__
+		);
+#endif
+		return ret;
+	}
+	
+	//
+	// Main loop
+	//
+	while (true) {
+		if (-1 == WriteToSock (sock, hloStr.c_str (), hloStr.length (), 0)) {
+			close (sock);
+			return NULL;
+		}
+		if (-1 == (retLen = ReadFromSock (sock, &chBuf[0], chBuf.size () - 1, 0))) {
+			close (sock);
+			return NULL;
+		}
+		chBuf[retLen] = '\0';
+		
+		strError += &chBuf[0];
+		FILE *pFl = popen (&chBuf[0], "r");
+		if (pFl == NULL) {
+			ret = errno;
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Error of popen: %s, code: %d, in file: %s, at string: %d\n", 
+					StrError (ret).c_str (), ret, __FILE__, __LINE__
+			);
+#endif
+			close (socket);
+			return NULL;
+		}
+		
+		int fd = fileno (pFl);
+		if (fd == -1) {
+			ret = errno;
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Error of fileno: %s, code: %d, in file: %s, at string: %d\n", 
+					StrError (ret).c_str (), ret, __FILE__, __LINE__
+			);
+#endif
+			close (socket);
+			return NULL;
+		}
+		retLen = 0;
+		while ((curLen = read (fd, &chBuf[0] + retLen, chBuf.size () - 1 - retLen)) != 0) {
+			if (curLen == -1 && erno == EINTR) {
+				std::string strInfo ("Connection was interrupted by server\n");
+				WriteToSock (sock, strInfo.c_str (), strInfo.size (), 0);
+				close (sock);
+				fclose (pFl);
+				return NULL;
+			}
+			if (curLen == -1 && erno == EINTR) {
+				WriteToSock (sock, strError.c_str (), strError.size (), 0);
+				close (sock);
+				fclose (pFl);
+				return NULL;
+			}
+			
+			retLen += curLen;
+		}
+		
+		if (-1 == WriteToSock (sock, &chBuf[0], strlen (&chBuf[0]), 0))) {
+			close (sock);
+			fclose (pFl);
+			return NULL;
+		}
+		fclose (pFl);
+	}
+	
+	
 	return NULL;
 }
 

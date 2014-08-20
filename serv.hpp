@@ -77,9 +77,10 @@ public:
 
 typedef struct _TASK_PARAMETERS {
 public:
-	_TASK_PARAMETERS (int sck = 0): sock (sck) {}
+	_TASK_PARAMETERS (int sck = 0, const std::string & str): sock (sck), helloStr (str) {}
 
 public:
+	std::string helloStr;
 	int sock;
 } TASK_PARAMETERS, *PTASK_PARAMETERS;
 
@@ -87,13 +88,15 @@ public:
 class CTask {
 public:
 	typedef std::shared_ptr <TASK_PARAMETERS> ParamPars;
-	
+
 private:
 	std::shared_ptr <TASK_PARAMETERS> m_tskParams;
-	void *argPtr;
 
 protected:
-	CTask (ParamPars pars, void *arg = NULL): m_tskParams (pars), argPtr (arg) {}
+	const std::shared_ptr <TASK_PARAMETERS> & getParams () const {
+		return m_tskParams;
+	}
+	CTask (ParamPars pars): m_tskParams (pars) {}
 	
 public:
 	virtual ~CTask () {}
@@ -204,6 +207,21 @@ typedef class _FLAGS_DATA {
 		pthread_spin_unlock (&m_guard);
 	}
 } FLAGS_DATA, *PFLAGS_DATA;
+
+
+typedef struct _DATA_HEADER {
+	//
+	// Information interchange between client and server exist of 256
+	// bytes header and useful data straight after the header
+	//
+	union {
+		char arr [256];
+		struct {
+			int dataLen; // the lenght of useful data, behind the header
+			// other info
+		} dat;
+	} u;
+} DATA_HEADER, *PDATA_HEADER;
 
 
 //

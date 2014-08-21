@@ -9,12 +9,15 @@
 #include <exception>
 #include <vector>
 #include <fstream>
+#include <sstream>
 
 #include <cassert>
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <arpa/inet.h>
 #include <pthread.h>
+#include <poll.h>
 
 
 //
@@ -64,6 +67,14 @@ public:
 		pthread_mutex_destroy (&m_syncQueue);
 	}
 	
+	template <typename Func>
+	void IterateEntries (Func f) {
+		pthread_mutex_lock (&m_syncQueue);
+		for (auto & entry : m_tskQueue) f (entry);
+		pthread_mutex_unlock (&m_syncQueue);
+		return;
+	}
+	
 	void Insert (pthread_t pthId, std::shared_ptr <CTask> par) {
 		pthread_mutex_lock (&m_syncQueue);
 		m_tskQueue.insert (std::make_pair (pthId, par));
@@ -72,6 +83,11 @@ public:
 	void Delete (pthread_t pthId) {
 		pthread_mutex_lock (&m_syncQueue);
 		m_tskQueue.erase (pthId);
+		pthread_mutex_unlock (&m_syncQueue);
+	}
+	void Clear () {
+		pthread_mutex_lock (&m_syncQueue);
+		m_tskQueue.clear ();
 		pthread_mutex_unlock (&m_syncQueue);
 	}
 };
@@ -95,8 +111,8 @@ private:
 	std::shared_ptr <TASK_PARAMETERS> m_tskParams;
 
 protected:
-	const std::shared_ptr <TASK_PARAMETERS> & getParams () const {
-		return m_tskParams;
+	const TASK_PARAMETERS & getParams () const {
+		return *m_tskParams;
 	}
 	CTask (ParamPars pars): m_tskParams (pars) {}
 	

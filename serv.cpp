@@ -125,7 +125,7 @@ int GetConfigInfo (
 }
 
 
-int AddToShadowConfig (int socket, const std::string & shadowConf) {
+int AddToShadowConfig (int socket, const std::string & shadowConf, bool isListen) {
 	return 1;
 }
 
@@ -174,10 +174,10 @@ int CreateListenSock (const std::string & shadowConf, int portNum, bool nonBlck 
 	sockAddr.sin_addr.s_addr = htonl (INADDR_ANY);
 	while (true) {
 		sockAddr.sin_port = htons (portNum);
-		if (-1 == bind () && errno == EADDRINUSE) {
+		if (-1 == (ret = bind (sock, &sockAddr, sizeof sockAddr)) && errno == EADDRINUSE) {
 			++portNum;
 			continue;
-		} else {
+		} else if (ret == -1) {
 		ret = errno;
 #ifndef NDEBUG
 			syslog (LOG_ERR, "Error of bind: %s, errno: %d, in %s at file: %s, on line: %s\n",
@@ -190,7 +190,7 @@ int CreateListenSock (const std::string & shadowConf, int portNum, bool nonBlck 
 		break;
 	}
 	
-	if (-1 == listen (socket, maxCnct / 2)) {
+	if (-1 == listen (sock, maxCnct / 2)) {
 		ret = errno;
 #ifndef NDEBUG
 		syslog (LOG_ERR, "Error of listen: %s, errno: %d, in %s at file: %s, on line: %s\n",
@@ -200,7 +200,7 @@ int CreateListenSock (const std::string & shadowConf, int portNum, bool nonBlck 
 		return -1;
 	}
 	
-	AddToShadowConfig (socket, shadowConf, true);
+	AddToShadowConfig (sock, shadowConf, true);
 	
 	
 	return sock;
@@ -247,7 +247,7 @@ ssize_t WriteToSock (int sock, const void *buf, size_t num, int flags) {
 	// useful data transfer
 	//
 	total = 0;
-	while (cur = send (sock, reinterpret_cast <char*> (buf) + total, num - total, flags)) {
+	while (cur = send (sock, static_cast <const char*> (buf) + total, num - total, flags)) {
 		if (cur == -1 && errno == EINTR) {
 			// have gotten SIGUSR2, to terminate transferring
 #ifndef NDEBUG
@@ -313,7 +313,7 @@ ssize_t ReadFromSock (int sock, void *buf, int flags) {
 	size_t num = datHdr.u.dat.dataLen;
 	if (num <= 0) return 0;
 	
-	while (cur = send (sock, reinterpret_cast <char*> (buf) + total, num - total, flags)) {
+	while (cur = send (sock, static_cast <char*> (buf) + total, num - total, flags)) {
 		if (cur == -1 && errno == EINTR) {
 			// have gotten SIGUSR2, to terminate transferring
 #ifndef NDEBUG
@@ -340,7 +340,7 @@ ssize_t ReadFromSock (int sock, void *buf, int flags) {
 
 
 int AcceptConnection (
-	int lstnSock
+	int lstnSock,
 	const std::string & shadowConf,
 	std::unordered_map <std::string, std::string> & authData,
 	std::string & userName
@@ -353,7 +353,7 @@ int AcceptConnection (
 	std::string strPass;
 	
 	
-	assert (shadowConf.length () != 0);
+	assert (shadowConf.size () != 0);
 	
 	if ((sock = accept (lstnSock, NULL, NULL)) == -1 && errno == EINTR) {
 #ifndef NDEBUG
@@ -370,7 +370,7 @@ int AcceptConnection (
 		return -1;
 	} else if (sock == -1 && errno == EWOULDBLOCK) {
 		struct pollfd polDat = {lstnSock, POLLIN, 0};
-		if ((ret = poll (&polDat, 1, g_sleepAcceptTimeout * 1000) == -1 && && errno == EINTR)) {
+		if ((ret = poll (&polDat, 1, g_sleepAcceptTimeout * 1000)) == -1 && errno == EINTR) {
 #ifndef NDEBUG
 			syslog (LOG_WARNING, "Before completion of poll have gotten SIGUSR1 signal\n");
 #endif
@@ -401,7 +401,7 @@ int AcceptConnection (
 		close (sock);
 		return -1;
 	}
-	if (-1 == (retLen = ReadFromSock (sock, &datBuf[0], datBuf.size () - 1, 0))) {
+	if (-1 == (retLen = ReadFromSock (sock, &datBuf[0], 0))) {
 		close (sock);
 		return -1;
 	}
@@ -414,7 +414,7 @@ int AcceptConnection (
 	if (it == authData.end ()) {
 #ifndef NDEBUG
 		std::string errStr ("Incorrect user name\n");
-		WriteToSock (sock, helloStr2, strlen (helloStr1), 0)
+		WriteToSock (sock, helloStr2, strlen (helloStr1), 0);
 #endif
 		close (sock);
 		return -1;
@@ -427,7 +427,7 @@ int AcceptConnection (
 		close (sock);
 		return -1;
 	}
-	if (-1 == (retLen = ReadFromSock (sock, &datBuf[0], datBuf.size () - 1, 0))) {
+	if (-1 == (retLen = ReadFromSock (sock, &datBuf[0], 0))) {
 		close (sock);
 		return -1;
 	}
@@ -439,7 +439,7 @@ int AcceptConnection (
 	if (it->second != &datBuf[0]) {
 #ifndef NDEBUG
 		std::string errStr ("Incorrect password\n");
-		WriteToSock (sock, helloStr2, strlen (helloStr1), 0)
+		WriteToSock (sock, helloStr2, strlen (helloStr1), 0);
 #endif
 		close (sock);
 		return -1;
@@ -458,6 +458,7 @@ int main (int argc, char *argv []) {
 		struct sigaction sigAct;
 		ShpTask hndTask (new CHandlerTask (ShpParams (new TASK_PARAMETERS)));
 		pthread_t thrSigHnd;
+		sigset_t sigMsk;
 		
 		//
 		// daemonize and logging
@@ -526,7 +527,7 @@ int main (int argc, char *argv []) {
 					StrError (ret).c_str (), ret, __FILE__, __LINE__
 			);
 #endif
-			return NULL;
+			return ret;
 		}
 		
 		//
@@ -573,7 +574,7 @@ int main (int argc, char *argv []) {
 			//
 			int portNum;
 			std::istringstream issCnv;
-			issCnv.str (portNumStr)
+			issCnv.str (portNumStr);
 			issCnv >> portNum;
 			if (-1 == (sockLstn = CreateListenSock (shadowConf, portNum))) return 1;
 			
@@ -591,7 +592,7 @@ int main (int argc, char *argv []) {
 					pthread_t pthId;
 					
 					ShpTask netTask (new CNetworkTask (ShpParams (new TASK_PARAMETERS (sock, userName))));
-					if (!(ret = netTask.Start (&pthId, NULL))) {
+					if (!(ret = netTask->Start (&pthId, NULL))) {
 #ifndef NDEBUG
 						syslog (LOG_ERR, "Error of pthread_create: %s, code: %d; file: %s - line: %d\n",
 								StrError (ret).c_str (), ret, __FILE__, __LINE__
@@ -602,7 +603,7 @@ int main (int argc, char *argv []) {
 					int tmp;
 					//pthread_setcancelstate (PTHREAD_CANCEL_ENABLE, &tmp);
 					//pthread_setcanceltype (PTHREAD_CANCEL_ASYNCHRONOUS, &tmp);
-					g_shpTmap.insert (pthId, netTask);
+					g_shpTmap->Insert (pthId, netTask);
 				}
 				
 				//
@@ -614,12 +615,10 @@ int main (int argc, char *argv []) {
 					syslog (LOG_WARNING, "Rereading of config file, and restarting\n");
 #endif
 					pthread_kill (thrSigHnd, SIGTERM);
-					for (auto & entry : g_shpTmap)
-					{
-						//pthread_cancel (entry.first);
-						pthread_kill (entry.first, SIGUSR2);
-					}
-					g_shpTmap.clear ();
+					g_shpTmap->IterateEntries (
+						[] (std::pair <const pthread_t, std::shared_ptr <CTask>> & entry)->void {pthread_kill (entry.first, SIGUSR2);}
+					);
+					g_shpTmap->Clear ();
 					sleep (1);
 					
 					break;
@@ -629,12 +628,10 @@ int main (int argc, char *argv []) {
 					syslog (LOG_WARNING, "Normal termination of the server\n");
 #endif
 					pthread_kill (thrSigHnd, SIGTERM);
-					for (auto & entry : g_shpTmap)
-					{
-						//pthread_cancel (entry.first);
-						pthread_kill (entry.first, SIGUSR2);
-					}
-					g_shpTmap.clear ();
+					g_shpTmap->IterateEntries (
+						[] (std::pair <const pthread_t, std::shared_ptr <CTask>> & entry)->void {pthread_kill (entry.first, SIGUSR2);}
+					);
+					g_shpTmap->Clear ();
 					sleep (1);
 					
 					return 0;
@@ -652,7 +649,7 @@ int main (int argc, char *argv []) {
 		return 100;
 	} catch (std::exception & Exc) {
 #ifndef NDEBUG
-		syslog (LOG_ERR, "Has caught an exception at root function: %s\n", Exc.MsgError ().c_str ());
+		syslog (LOG_ERR, "Has caught an exception at root function: %s\n", Exc.what ());
 #endif
 		return 101;
 	}
@@ -664,7 +661,7 @@ int main (int argc, char *argv []) {
 
 void* CHandlerTask::WorkerFunction () {
 	int ret, sigRet;
-	sigmask_t sigMsk;
+	sigset_t sigMsk;
 	
 	//
 	// mask of signals adjusting
@@ -675,7 +672,7 @@ void* CHandlerTask::WorkerFunction () {
 #ifndef NDEBUG
 	syslog (LOG_ERR, "Error of sigprocmask: %s, code: %d\n", StrError (ret).c_str (), ret);
 #endif
-		return ret;
+		return NULL;
 	}
 	
 	sigemptyset (&sigMsk);
@@ -740,7 +737,7 @@ void* CNetworkTask::WorkerFunction () {
 				StrError (ret).c_str (), ret, __FILE__, __LINE__
 		);
 #endif
-		return ret;
+		return NULL;
 	}
 	
 	//
@@ -766,7 +763,7 @@ void* CNetworkTask::WorkerFunction () {
 					StrError (ret).c_str (), ret, __FILE__, __LINE__
 			);
 #endif
-			close (socket);
+			close (sock);
 			return NULL;
 		}
 		
@@ -778,19 +775,19 @@ void* CNetworkTask::WorkerFunction () {
 					StrError (ret).c_str (), ret, __FILE__, __LINE__
 			);
 #endif
-			close (socket);
+			close (sock);
 			return NULL;
 		}
 		retLen = 0;
 		while ((curLen = read (fd, &chBuf[0] + retLen, chBuf.size () - 1 - retLen)) != 0) {
-			if (curLen == -1 && erno == EINTR) {
+			if (curLen == -1 && errno == EINTR) {
 				//std::string strInfo ("Connection was interrupted by server\n");
 				//WriteToSock (sock, strInfo.c_str (), strInfo.size (), 0);
 				close (sock);
 				fclose (pFl);
 				return NULL;
 			}
-			if (curLen == -1 && erno == EINTR) {
+			if (curLen == -1 && errno == EINTR) {
 				//WriteToSock (sock, strError.c_str (), strError.size (), 0);
 				close (sock);
 				fclose (pFl);
@@ -800,7 +797,7 @@ void* CNetworkTask::WorkerFunction () {
 			retLen += curLen;
 		}
 		
-		if (-1 == WriteToSock (sock, &chBuf[0], strlen (&chBuf[0]), 0)) || -2 == retLen) {
+		if ((-1 == WriteToSock (sock, &chBuf[0], strlen (&chBuf[0]), 0)) || -2 == retLen) {
 			close (sock);
 			fclose (pFl);
 			return NULL;

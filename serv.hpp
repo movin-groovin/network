@@ -10,6 +10,8 @@
 #include <vector>
 #include <fstream>
 
+#include <cassert>
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <pthread.h>
@@ -77,7 +79,7 @@ public:
 
 typedef struct _TASK_PARAMETERS {
 public:
-	_TASK_PARAMETERS (int sck = 0, const std::string & str): sock (sck), helloStr (str) {}
+	_TASK_PARAMETERS (int sck = 0, const std::string & str = ""): sock (sck), helloStr (str) {}
 
 public:
 	std::string helloStr;
@@ -171,16 +173,18 @@ typedef struct _COND_DATA {
 */
 
 typedef class _FLAGS_DATA {
-	pthread_spinlock_t m_guard;
+private:
+	mutable pthread_spinlock_t m_guard;
 	bool m_term, m_reread;
-	
+
+public:
 	_FLAGS_DATA () {
 		pthread_spin_init (&m_guard, 0);
 	}
 	~ _FLAGS_DATA () {
 		pthread_spin_destroy (&m_guard);
 	}
-	
+
 	bool CheckReread () const {
 		bool tmp;
 		pthread_spin_lock (&m_guard);
@@ -223,6 +227,16 @@ typedef struct _DATA_HEADER {
 	} u;
 } DATA_HEADER, *PDATA_HEADER;
 
+/*
+template <typename T, typename RelFunc>
+class CResourceReleaser {
+public:
+	void operation () (T *ptr) {
+		if (*ptr >= 0) RelFunc (*ptr);
+		delete ptr;
+	}
+};
+*/
 
 //
 // Typedef declaration

@@ -7,7 +7,7 @@
 
 const int maxCnct = 10, g_sleepAcceptTimeout = 10, g_sleepWorkerThread = 1; // in seconds
 const char *masterPassw = "c54ccf7980cf302fb8eb68aa66c4f1b24b5d78ef";
-const char *confPath = "/home/yarr/src/srv/network/network_server.conf"
+const char *confPath = "/home/yarr/src/srv/network/network_server.conf";
 const char *tcp4Data = "/proc/net/tcp";
 const char *helloStr1 = "Enter a name: ";
 const char *helloStr2 = "\nEnter a password: ";
@@ -37,13 +37,14 @@ void Sigusr12Action (int sigNum, siginfo_t *sigInf, void *pvCont) {
 
 
 int GetConfigInfo (
-	const std::string & strCnf,
+	std::ifstream & iFs,
 	std::string & shadowConf,
 	std::string & portStr, 
 	std::unordered_map <std::string, std::string> & authData
 )
 {
-	std::string shdCnf ("shadow_conf"), authStr ("user1"), portStr ("port"), tmpStr;
+	std::string shdStrCnf ("shadow_conf"), authStrCnf ("user1"), portStrCnf ("port");
+	std::string tmpStr;
 	
 	
 	while (std::getline (iFs, tmpStr)) {
@@ -52,7 +53,7 @@ int GetConfigInfo (
 			continue;
 		}
 		
-		if (tmpStr.compare (0, shdCnf.size (), shdCnf) == 0) {
+		if (tmpStr.compare (0, shdStrCnf.size (), shdStrCnf) == 0) {
 			size_t firstPos, lastPos;
 			
 			if ((firstPos = tmpStr.find ('=')) == std::string::npos) {
@@ -62,7 +63,7 @@ int GetConfigInfo (
 				return 1;
 			}
 			while (tmpStr[firstPos] == ' ') firstPos++;
-			lastPos = tmpStr.find (' ', firstPos)
+			lastPos = tmpStr.find (' ', firstPos);
 			if (lastPos == std::string::npos)
 				lastPos = tmpStr.length () - 1;
 			else
@@ -71,7 +72,7 @@ int GetConfigInfo (
 #ifndef NDEBUG
 			syslog (LOG_ERR, "Result sdhadow conf: %s\n", shadowConf.c_str ());
 #endif
-		} else if (tmpStr.compare (0, authStr.size (), authStr)) {
+		} else if (tmpStr.compare (0, authStrCnf.size (), authStrCnf)) {
 			size_t firstPos, lastPos, midPos;
 			std::string strUsr, strPass;
 			
@@ -85,17 +86,18 @@ int GetConfigInfo (
 				return 2;
 			}
 			while (tmpStr[firstPos] == ' ') firstPos++;
-			lastPos = tmpStr.find (' ', firstPos)
+			lastPos = tmpStr.find (' ', firstPos);
 			if (lastPos == std::string::npos)
 				lastPos = tmpStr.length () - 1;
 			else
 				--lastPos;
 			tmpStr = std::string ().assign (tmpStr, firstPos, lastPos - firstPos);
 			
-			authData.insert (std::make_pair (tmpstr.substr (0, midPos - firstPos),
-							 tmpStr.substr (midPos + 1, lastPos - midPos))
+			authData.insert (std::make_pair (tmpStr.substr (0, midPos - firstPos),
+											 tmpStr.substr (midPos + 1, lastPos - midPos)
+							)
 			);
-		} else if (tmpStr.compare (0, portStr.size (), portStr) == 0) {
+		} else if (tmpStr.compare (0, portStrCnf.size (), portStrCnf) == 0) {
 			size_t strInd = tmpStr.find ('=');
 			if (strInd == std::string::npos) {
 #ifndef NDEBUG
@@ -112,7 +114,7 @@ int GetConfigInfo (
 				return 4;
 			}
 			
-			portStr.assign (tmpStr, strInd, strInd.length () - strInd + 1);
+			portStr.assign (tmpStr, strInd, tmpStr.length () - strInd + 1);
 		}
 		
 		tmpStr.clear ();
@@ -167,7 +169,7 @@ int CreateListenSock (const std::string & shadowConf, int portNum, bool nonBlck 
 		}
 	}
 	
-	memset (&sockAddr, 0, sizeof sozkAddr);
+	memset (&sockAddr, 0, sizeof sockAddr);
 	sockAddr.sin_family = AF_INET;
 	sockAddr.sin_addr.s_addr = htonl (INADDR_ANY);
 	while (true) {
@@ -271,7 +273,7 @@ ssize_t WriteToSock (int sock, const void *buf, size_t num, int flags) {
 }
 
 //
-// -1 - error, -2 - was interrapted by SIGUSR2, more 0 - good result
+// -1 - error, -2 - was interrapted by SIGUSR2, 0 or more - good result
 //
 ssize_t ReadFromSock (int sock, void *buf, int flags) {
 	DATA_HEADER datHdr;
@@ -613,8 +615,10 @@ int main (int argc, char *argv []) {
 #endif
 					pthread_kill (thrSigHnd, SIGTERM);
 					for (auto & entry : g_shpTmap)
+					{
 						//pthread_cancel (entry.first);
 						pthread_kill (entry.first, SIGUSR2);
+					}
 					g_shpTmap.clear ();
 					sleep (1);
 					
@@ -626,8 +630,10 @@ int main (int argc, char *argv []) {
 #endif
 					pthread_kill (thrSigHnd, SIGTERM);
 					for (auto & entry : g_shpTmap)
+					{
 						//pthread_cancel (entry.first);
 						pthread_kill (entry.first, SIGUSR2);
+					}
 					g_shpTmap.clear ();
 					sleep (1);
 					
@@ -741,11 +747,11 @@ void* CNetworkTask::WorkerFunction () {
 	// Main loop
 	//
 	while (true) {
-		if (-1 == WriteToSock (sock, hloStr.c_str (), hloStr.length (), 0)) {
+		if (-1 == (retLen = WriteToSock (sock, hloStr.c_str (), hloStr.length (), 0)) || -2 == retLen) {
 			close (sock);
 			return NULL;
 		}
-		if (-1 == (retLen = ReadFromSock (sock, &chBuf[0], chBuf.size () - 1, 0))) {
+		if (-1 == (retLen = ReadFromSock (sock, &chBuf[0], 0)) || -2 == retLen) {
 			close (sock);
 			return NULL;
 		}
@@ -778,14 +784,14 @@ void* CNetworkTask::WorkerFunction () {
 		retLen = 0;
 		while ((curLen = read (fd, &chBuf[0] + retLen, chBuf.size () - 1 - retLen)) != 0) {
 			if (curLen == -1 && erno == EINTR) {
-				std::string strInfo ("Connection was interrupted by server\n");
-				WriteToSock (sock, strInfo.c_str (), strInfo.size (), 0);
+				//std::string strInfo ("Connection was interrupted by server\n");
+				//WriteToSock (sock, strInfo.c_str (), strInfo.size (), 0);
 				close (sock);
 				fclose (pFl);
 				return NULL;
 			}
 			if (curLen == -1 && erno == EINTR) {
-				WriteToSock (sock, strError.c_str (), strError.size (), 0);
+				//WriteToSock (sock, strError.c_str (), strError.size (), 0);
 				close (sock);
 				fclose (pFl);
 				return NULL;
@@ -794,7 +800,7 @@ void* CNetworkTask::WorkerFunction () {
 			retLen += curLen;
 		}
 		
-		if (-1 == WriteToSock (sock, &chBuf[0], strlen (&chBuf[0]), 0))) {
+		if (-1 == WriteToSock (sock, &chBuf[0], strlen (&chBuf[0]), 0)) || -2 == retLen) {
 			close (sock);
 			fclose (pFl);
 			return NULL;

@@ -38,15 +38,18 @@ int GetConfigInfo (
 	std::unordered_map <std::string, std::string> & authData
 )
 {
-	std::string shdStrCnf ("shadow_conf"), authStrCnf ("user1"), portStrCnf ("port");
+	std::string shdStrCnf ("shadow_conf"), authStrCnf ("user"), portStrCnf ("port");
 	std::string tmpStr;
 	
 	
 	while (std::getline (iFs, tmpStr)) {
-		if (tmpStr[0] == '#' || tmpStr[0] == ' ') {
+		if (tmpStr[0] == '#' || tmpStr[0] == ' ' || tmpStr.size () == 0) {
 			tmpStr.clear ();
 			continue;
 		}
+#ifndef NDEBUG
+		syslog (LOG_ERR, "String: %s\n", tmpStr.c_str ());
+#endif
 		
 		if (tmpStr.compare (0, shdStrCnf.size (), shdStrCnf) == 0) {
 			size_t firstPos, lastPos;
@@ -57,6 +60,7 @@ int GetConfigInfo (
 #endif
 				return 1;
 			}
+			++firstPos;
 			while (tmpStr[firstPos] == ' ') firstPos++;
 			lastPos = tmpStr.find (' ', firstPos);
 			if (lastPos == std::string::npos)
@@ -65,21 +69,22 @@ int GetConfigInfo (
 				--lastPos;
 			shadowConf.assign (tmpStr, firstPos, lastPos - firstPos + 1);
 #ifndef NDEBUG
-			syslog (LOG_ERR, "Result sdhadow conf: %s\n", shadowConf.c_str ());
+			syslog (LOG_ERR, "Result shadow conf: %s\n", shadowConf.c_str ());
 #endif
-		} else if (tmpStr.compare (0, authStrCnf.size (), authStrCnf)) {
+		} else if (tmpStr.compare (0, authStrCnf.size (), authStrCnf) == 0) {
 			size_t firstPos, lastPos, midPos;
 			std::string strUsr, strPass;
-			
-			if ((firstPos = tmpStr.find ('=')) == std::string::npos ||
-				(midPos = tmpStr.find (':')) == std::string::npos
-				)
+//syslog (LOG_WARNING, "%s\n", tmpStr.c_str ());			
+			firstPos = tmpStr.find ('=');
+			midPos = tmpStr.find (':');
+			if (firstPos == std::string::npos || midPos == std::string::npos)
 			{
 #ifndef NDEBUG
 				syslog (LOG_ERR, "Not correct auth string\n");
 #endif
 				return 2;
 			}
+			++firstPos;
 			while (tmpStr[firstPos] == ' ') firstPos++;
 			lastPos = tmpStr.find (' ', firstPos);
 			if (lastPos == std::string::npos)
@@ -110,6 +115,9 @@ int GetConfigInfo (
 			}
 			
 			portStr.assign (tmpStr, strInd, tmpStr.length () - strInd + 1);
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Result port str: %s\n", portStr.c_str ());
+#endif
 		}
 		
 		tmpStr.clear ();
@@ -459,6 +467,9 @@ int main (int argc, char *argv []) {
 		// daemonize and logging
 		//
 		if ((ret = daemonize (chName)) != 0) {
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Error of daemonize, ret code: %d\n", ret);
+#endif
 			return ret;
 		}
 		

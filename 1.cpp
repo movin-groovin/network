@@ -2,6 +2,9 @@
 #include <iostream>
 
 
+void func1 (int);
+
+
 class COne {
 public:
 	//void func1 ();

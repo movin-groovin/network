@@ -18,11 +18,6 @@ FLAGS_DATA g_flgDat;
 
 
 
-void* CallFunc (void * pvPtr) {
-	return static_cast <CTask*> (pvPtr)->WorkerFunction ();
-}
-
-
 std::string StrError (int errCode) {
 	std::vector <char> tmp (1024 + 1);
 	
@@ -132,7 +127,7 @@ int AddToShadowConfig (int socket, const std::string & shadowConf, bool isListen
 
 int CreateListenSock (const std::string & shadowConf, int portNum, bool nonBlck = true) {
 	int ret, sock, fdVal;
-	struct sockaddr sockAddr;
+	struct sockaddr_in sockAddr;
 	
 	
 	assert (shadowConf.length () != 0);
@@ -174,7 +169,7 @@ int CreateListenSock (const std::string & shadowConf, int portNum, bool nonBlck 
 	sockAddr.sin_addr.s_addr = htonl (INADDR_ANY);
 	while (true) {
 		sockAddr.sin_port = htons (portNum);
-		if (-1 == (ret = bind (sock, &sockAddr, sizeof sockAddr)) && errno == EADDRINUSE) {
+		if (-1 == (ret = bind (sock, reinterpret_cast <sockaddr*> (&sockAddr), sizeof sockAddr)) && errno == EADDRINUSE) {
 			++portNum;
 			continue;
 		} else if (ret == -1) {

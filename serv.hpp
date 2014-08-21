@@ -24,6 +24,9 @@
 // Function prototypes
 //
 std::string StrError (int errCode);
+//
+// CallFunc is a friend function of class CTask and defined there
+//
 void* CallFunc (void * pvPtr);
 
 //
@@ -104,6 +107,10 @@ public:
 
 
 class CTask {
+	friend void* CallFunc (void * pvPtr) {
+		return static_cast <CTask*> (pvPtr)->WorkerFunction ();
+	}
+	
 public:
 	typedef std::shared_ptr <TASK_PARAMETERS> ParamPars;
 
@@ -155,38 +162,6 @@ public:
 	
 };
 
-/*
-typedef struct _COND_DATA {
-	pthread_mutex_t syncMut;
-	pthread_cond_t syncCond;
-	
-	_COND_DATA () {
-		int ret;
-		std::istringstream issCnv;
-		
-		if ((ret = pthread_mutex_init (&syncMut, NULL)) != 0) {
-			issCnv << ret;
-			throw CException ("Error of pthread_mutex_init, description: " + 
-							  StrError (ret) + "; code: " + issCnv.str () + "\n"
-			);
-		}
-		if ((ret = pthread_cond_init (&syncCond, NULL)) != 0) {
-			pthread_mutex_destroy (&syncMut);
-			issCnv << ret;
-			throw CException ("Error of pthread_cond_init, description: " + 
-							  StrError (ret) + "; code: " + issCnv.str () + "\n"
-			);
-		}
-		
-		return;
-	}
-	~ _COND_DATA () {
-		pthread_mutex_destroy (&syncMut);
-		pthread_cond_destroy (&syncCond);
-	}
-	
-} COND_DATA, *PCOND_DATA;
-*/
 
 typedef class _FLAGS_DATA {
 private:

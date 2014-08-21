@@ -68,13 +68,10 @@ int GetConfigInfo (
 			else
 				--lastPos;
 			shadowConf.assign (tmpStr, firstPos, lastPos - firstPos + 1);
-#ifndef NDEBUG
-			syslog (LOG_ERR, "Result shadow conf: %s\n", shadowConf.c_str ());
-#endif
+
 		} else if (tmpStr.compare (0, authStrCnf.size (), authStrCnf) == 0) {
 			size_t firstPos, lastPos, midPos;
-			std::string strUsr, strPass;
-//syslog (LOG_WARNING, "%s\n", tmpStr.c_str ());			
+			std::string strUsr, strPass;	
 			firstPos = tmpStr.find ('=');
 			midPos = tmpStr.find (':');
 			if (firstPos == std::string::npos || midPos == std::string::npos)
@@ -91,7 +88,6 @@ int GetConfigInfo (
 				lastPos = tmpStr.length () - 1;
 			else
 				--lastPos;
-			tmpStr = std::string ().assign (tmpStr, firstPos, lastPos - firstPos);
 			
 			authData.insert (std::make_pair (tmpStr.substr (0, midPos - firstPos),
 											 tmpStr.substr (midPos + 1, lastPos - midPos)

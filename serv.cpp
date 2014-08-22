@@ -101,7 +101,7 @@ int GetConfigInfo (
 #endif
 				return 3;
 			}
-			
+			++strInd;
 			while (tmpStr[strInd] == ' ') ++strInd;
 			if (strInd == tmpStr.length ()) {
 #ifndef NDEBUG
@@ -226,7 +226,8 @@ ssize_t WriteToSock (int sock, const void *buf, size_t num, int flags) {
 	// header transfer
 	//
 	total = 0;
-	while (cur = send (sock, reinterpret_cast <char*> (&datHdr) + total, sizeof datHdr - total, flags)) {
+	while (total < sizeof datHdr) {
+		cur = send (sock, reinterpret_cast <char*> (&datHdr) + total, sizeof datHdr - total, flags);
 		if (cur == -1 && errno == EINTR) {
 			// have gotten SIGUSR2, to terminate transferring
 #ifndef NDEBUG
@@ -237,12 +238,13 @@ ssize_t WriteToSock (int sock, const void *buf, size_t num, int flags) {
 		if (cur == -1 && errno != EINTR) {
 			ret = errno;
 #ifndef NDEBUG
-			syslog (LOG_ERR, "Error of send: %s, errno: %d, in %s at file: %s, on line: %s\n",
+			syslog (LOG_ERR, "Error of send: %s, errno: %d, in: %s, at file: %s, on line: %d\n",
 					StrError (ret).c_str (), ret, __PRETTY_FUNCTION__, __FILE__, __LINE__
 			);
 #endif
 			return -1;
 		}
+		if (cur == 0) break; // EOF
 		
 		total += cur;
 	}
@@ -251,7 +253,8 @@ ssize_t WriteToSock (int sock, const void *buf, size_t num, int flags) {
 	// useful data transfer
 	//
 	total = 0;
-	while (cur = send (sock, static_cast <const char*> (buf) + total, num - total, flags)) {
+	while (total < num) {
+		cur = send (sock, static_cast <const char*> (buf) + total, num - total, flags);
 		if (cur == -1 && errno == EINTR) {
 			// have gotten SIGUSR2, to terminate transferring
 #ifndef NDEBUG
@@ -262,12 +265,13 @@ ssize_t WriteToSock (int sock, const void *buf, size_t num, int flags) {
 		if (cur == -1 && errno != EINTR) {
 			ret = errno;
 #ifndef NDEBUG
-			syslog (LOG_ERR, "Error of send: %s, errno: %d, in %s at file: %s, on line: %s\n",
+			syslog (LOG_ERR, "Error of send: %s, errno: %d, in %s, at file: %s, on line: %d\n",
 					StrError (ret).c_str (), ret, __PRETTY_FUNCTION__, __FILE__, __LINE__
 			);
 #endif
 			return -1;
 		}
+		if (cur == 0) break; // EOF
 		
 		total += cur;
 	}
@@ -289,7 +293,8 @@ ssize_t ReadFromSock (int sock, void *buf, int flags) {
 	// header transfer
 	//
 	total = 0;
-	while (cur = send (sock, reinterpret_cast <char*> (&datHdr) + total, sizeof datHdr - total, flags)) {
+	while (total < sizeof datHdr) {
+		cur = recv (sock, reinterpret_cast <char*> (&datHdr) + total, sizeof datHdr - total, flags);
 		if (cur == -1 && errno == EINTR) {
 			// have gotten SIGUSR2, to terminate transferring
 #ifndef NDEBUG
@@ -300,12 +305,13 @@ ssize_t ReadFromSock (int sock, void *buf, int flags) {
 		if (cur == -1 && errno != EINTR) {
 			ret = errno;
 #ifndef NDEBUG
-			syslog (LOG_ERR, "Error of send: %s, errno: %d, in %s at file: %s, on line: %s\n",
+			syslog (LOG_ERR, "Error of recv: %s, errno: %d, in %s, at file: %s, on line: %d\n",
 					StrError (ret).c_str (), ret, __PRETTY_FUNCTION__, __FILE__, __LINE__
 			);
 #endif
 			return -1;
 		}
+		if (cur == 0) break; // EOF
 		
 		total += cur;
 	}
@@ -317,7 +323,8 @@ ssize_t ReadFromSock (int sock, void *buf, int flags) {
 	size_t num = datHdr.u.dat.dataLen;
 	if (num <= 0) return 0;
 	
-	while (cur = send (sock, static_cast <char*> (buf) + total, num - total, flags)) {
+	while (total < num) {
+		cur = recv (sock, static_cast <char*> (buf) + total, num - total, flags);
 		if (cur == -1 && errno == EINTR) {
 			// have gotten SIGUSR2, to terminate transferring
 #ifndef NDEBUG
@@ -328,12 +335,13 @@ ssize_t ReadFromSock (int sock, void *buf, int flags) {
 		if (cur == -1 && errno != EINTR) {
 			ret = errno;
 #ifndef NDEBUG
-			syslog (LOG_ERR, "Error of send: %s, errno: %d, in %s at file: %s, on line: %s\n",
+			syslog (LOG_ERR, "Error of recv: %s, errno: %d, in %s, at file: %s, on line: %d\n",
 					StrError (ret).c_str (), ret, __PRETTY_FUNCTION__, __FILE__, __LINE__
 			);
 #endif
 			return -1;
 		}
+		if (cur == 0) break; // EOF
 		
 		total += cur;
 	}
@@ -359,12 +367,40 @@ int AcceptConnection (
 	
 	assert (shadowConf.size () != 0);
 	
+	//
+	// waiting of interested events
+	//
+	struct pollfd polDat = {lstnSock, POLLIN, 0};
+	if ((ret = poll (&polDat, 1, g_sleepAcceptTimeout * 1000)) == -1 && errno == EINTR) {
+#ifndef NDEBUG
+		syslog (LOG_WARNING, "Before completion of poll have gotten SIGUSR1 signal\n");
+#endif
+		return -2;
+	} else if (ret == -1) { // errno != EINTR
+	ret = errno;
+#ifndef NDEBUG
+		syslog (LOG_ERR, "Error of poll: %s, errno: %d, in %s at file: %s, on line: %s\n",
+				StrError (ret).c_str (), ret, __PRETTY_FUNCTION__, __FILE__, __LINE__
+		);
+#endif
+		return -1;
+	}
+	if (ret == 0) {
+#ifndef NDEBUG
+		syslog (LOG_WARNING, "Have elapsed time at call of poll\n");
+#endif
+		return -2;
+	}
+	
+	//
+	// acceptance of client socket
+	//
 	if ((sock = accept (lstnSock, NULL, NULL)) == -1 && errno == EINTR) {
 #ifndef NDEBUG
 		syslog (LOG_WARNING, "Before completion of accept have gotten SIGUSR1 signal\n");
 #endif
 		return -2;
-	} else if (sock == -1 && errno != EWOULDBLOCK) {
+	} else if (sock == -1) { // errno == EWOULDBLOCK or != EWOULDBLOCK - no matter the fact is that our ready socket have evaporated
 		ret = errno;
 #ifndef NDEBUG
 		syslog (LOG_ERR, "Error of accept: %s, errno: %d, in %s at file: %s, on line: %s\n",
@@ -372,40 +408,19 @@ int AcceptConnection (
 		);
 #endif
 		return -1;
-	} else if (sock == -1 && errno == EWOULDBLOCK) {
-		struct pollfd polDat = {lstnSock, POLLIN, 0};
-		if ((ret = poll (&polDat, 1, g_sleepAcceptTimeout * 1000)) == -1 && errno == EINTR) {
-#ifndef NDEBUG
-			syslog (LOG_WARNING, "Before completion of poll have gotten SIGUSR1 signal\n");
-#endif
-			return -2;
-		} else if (ret == -1) { // errno != EINTR
-		ret = errno;
-#ifndef NDEBUG
-			syslog (LOG_ERR, "Error of poll: %s, errno: %d, in %s at file: %s, on line: %s\n",
-					StrError (ret).c_str (), ret, __PRETTY_FUNCTION__, __FILE__, __LINE__
-			);
-#endif
-			return -1;
-		}
-		if (ret == 0) {
-#ifndef NDEBUG
-			syslog (LOG_WARNING, "Have elapsed time at call of poll\n");
-#endif
-			return -2;
-		}
 	}
+	
 	
 	AddToShadowConfig (sock, shadowConf, false);
 	
 	//
 	// login check
 	//
-	if (strlen (helloStr1) != WriteToSock (sock, helloStr1, strlen (helloStr1), 0)) {
+	if (0 >= WriteToSock (sock, helloStr1, strlen (helloStr1), 0)) {
 		close (sock);
 		return -1;
 	}
-	if (-1 == (retLen = ReadFromSock (sock, &datBuf[0], 0))) {
+	if (0 >= (retLen = ReadFromSock (sock, &datBuf[0], 0))) {
 		close (sock);
 		return -1;
 	}
@@ -427,11 +442,11 @@ int AcceptConnection (
 	//
 	// pass check
 	//
-	if (strlen (helloStr1) != WriteToSock (sock, helloStr2, strlen (helloStr1), 0)) {
+	if (0 >= WriteToSock (sock, helloStr2, strlen (helloStr2), 0)) {
 		close (sock);
 		return -1;
 	}
-	if (-1 == (retLen = ReadFromSock (sock, &datBuf[0], 0))) {
+	if (0 >= (retLen = ReadFromSock (sock, &datBuf[0], 0))) {
 		close (sock);
 		return -1;
 	}
@@ -448,7 +463,7 @@ int AcceptConnection (
 		close (sock);
 		return -1;
 	}
-	userName = it->first;
+	userName = it->first + ": ";
 	
 	
 	return sock;
@@ -728,7 +743,6 @@ void* CNetworkTask::WorkerFunction () {
 	ssize_t retLen, curLen;
 	int sock = getParams ().sock;
 	std::string hloStr = getParams ().helloStr;
-	std::string strError ("While executing a command have happened an error, command: ");
 	sigset_t sigMsk;
 	std::vector <char> chBuf (4096);
 	struct sigaction sigAct;
@@ -756,6 +770,8 @@ void* CNetworkTask::WorkerFunction () {
 	// Main loop
 	//
 	while (true) {
+		std::string strErr ("While executing a command have happened an error, command: ");
+		
 		if (-1 == (retLen = WriteToSock (sock, hloStr.c_str (), hloStr.length (), 0)) || -2 == retLen) {
 			close (sock);
 			return NULL;
@@ -766,13 +782,13 @@ void* CNetworkTask::WorkerFunction () {
 		}
 		chBuf[retLen] = '\0';
 		
-		strError += &chBuf[0];
+		strErr += &chBuf[0];
 		FILE *pFl = popen (&chBuf[0], "r");
 		if (pFl == NULL) {
 			ret = errno;
 #ifndef NDEBUG
-			syslog (LOG_ERR, "Error of popen: %s, code: %d, in file: %s, at string: %d\n", 
-					StrError (ret).c_str (), ret, __FILE__, __LINE__
+			syslog (LOG_ERR, "Error of popen: %s, code: %d, in file: %s, at string: %d, command: %s\n", 
+					StrError (ret).c_str (), ret, __FILE__, __LINE__, &chBuf[0]
 			);
 #endif
 			close (sock);

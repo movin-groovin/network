@@ -1,5 +1,6 @@
 
 #include <iostream>
+#include <sstream>
 
 
 void func1 (int);
@@ -22,7 +23,14 @@ int main () {
 	
 	
 	obj.f ();
+	std::string str1 ("12345");
+	std::istringstream issCnv;
 	
+	issCnv.str (str1);
+	int var;
+	issCnv >> var;
+	
+	std::cout << "Var: " << var << std::endl;
 	
 	
 	return 0;

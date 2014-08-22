@@ -2,7 +2,7 @@
 #-*- encoding: utf-8 -*-
 
 
-import sys, os, socket, struct
+import sys, os, socket, struct, binascii
 
 
 g_headerSize = 256
@@ -30,8 +30,12 @@ def ReadString (s):
 		totLen += len (ret)
 		data += ret
 		if totLen == g_headerSize: break
+	#print binascii.hexlify (data)
 	
-	totLen = struct.unpack ("i", data)
+	totLen = struct.unpack ("i", data[0:4])[0]
+	#print (type (totLen))
+	#print (totLen)
+	
 	data = ""
 	while totLen > 0:
 		ret = s.recv (totLen)
@@ -53,13 +57,17 @@ def main ():
 	sock = socket.socket (socket.AF_INET, socket.SOCK_STREAM)
 	sock.connect ((sys.argv[1], int (sys.argv[2])))
 	
-	SendString (sock, raw_input ("Enter login: "))
-	print (ReadString (sock))
-	SendString (sock, raw_input ("Enter password: "))
-	print (ReadString (sock))
+	sys.stdout.write (ReadString (sock))
+	#SendString (sock, raw_input ("Enter login: "))
+	SendString (sock, sys.stdin.read ())
+	sys.stdout.write (ReadString (sock))
+	#SendString (sock, raw_input ("Enter password: "))
+	SendString (sock, sys.stdin.read ())
+	sys.stdout.write (ReadString (sock))
 	
 	while True:
-		SendString (sock, raw_input ("Command: "))
+		#SendString (sock, raw_input ("Command: "))
+		SendString (sock, sys.stdin.read ())
 		sys.stdout.write ("Results: ")
 		print (ReadString (sock))
 		

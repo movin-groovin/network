@@ -77,6 +77,7 @@ def main ():
 		print (ReadString (sock))
 		
 	print ("=====================")
+	#http://pymotw.com/2/struct/
 	
 	
 	return

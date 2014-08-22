@@ -170,8 +170,13 @@ int CreateListenSock (const std::string & shadowConf, int portNum, bool nonBlck 
 	
 	memset (&sockAddr, 0, sizeof sockAddr);
 	sockAddr.sin_family = AF_INET;
+#ifndef NDEBUG
+	assert (0 != inet_aton ("127.0.0.1", &sockAddr.sin_addr));
+#else
 	sockAddr.sin_addr.s_addr = htonl (INADDR_ANY);
+#endif
 	while (true) {
+//syslog (LOG_WARNING, "PORT: %d\n", portNum);
 		sockAddr.sin_port = htons (portNum);
 		if (-1 == (ret = bind (sock, reinterpret_cast <sockaddr*> (&sockAddr), sizeof sockAddr)) && errno == EADDRINUSE) {
 			++portNum;
@@ -475,6 +480,7 @@ int main (int argc, char *argv []) {
 #endif
 			return 0;
 		}
+		confPath = argv[1];
 
 #ifndef NDEBUG
 		openlog (chName, LOG_PID, LOG_USER);
@@ -557,7 +563,9 @@ int main (int argc, char *argv []) {
 			if (!iFs) {
 				ret = errno;
 #ifndef NDEBUG
-				syslog (LOG_ERR, "Error of file opening: %s, code: %d\n", StrError (ret).c_str (), ret);
+				syslog (LOG_ERR, "Error of file opening: %s, code: %d, file: %s\n",
+						StrError (ret).c_str (), ret, confPath
+				);
 #endif
 				return ret;
 			}
@@ -621,6 +629,7 @@ int main (int argc, char *argv []) {
 						[] (std::pair <const pthread_t, std::shared_ptr <CTask>> & entry)->void {pthread_kill (entry.first, SIGUSR2);}
 					);
 					g_shpTmap->Clear ();
+					close (sockLstn);
 					sleep (1);
 					
 					break;
@@ -634,6 +643,7 @@ int main (int argc, char *argv []) {
 						[] (std::pair <const pthread_t, std::shared_ptr <CTask>> & entry)->void {pthread_kill (entry.first, SIGUSR2);}
 					);
 					g_shpTmap->Clear ();
+					close (sockLstn);
 					sleep (1);
 					
 					return 0;

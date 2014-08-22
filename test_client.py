@@ -13,6 +13,7 @@ def SendString (s, strDat):
 	data = struct.pack ("i", len (strDat))
 	data = data + struct.pack ("B", 0) * (g_headerSize - len (data))
 	data += strDat
+	#print binascii.hexlify (data)
 	
 	totLen = 0
 	while totLen < len (data):
@@ -57,17 +58,21 @@ def main ():
 	sock = socket.socket (socket.AF_INET, socket.SOCK_STREAM)
 	sock.connect ((sys.argv[1], int (sys.argv[2])))
 	
+	# first string from server
 	sys.stdout.write (ReadString (sock))
-	#SendString (sock, raw_input ("Enter login: "))
-	SendString (sock, sys.stdin.read ())
+	# login name
+	sndStr = sys.stdin.readline ()
+	SendString (sock, sndStr[0 : len (sndStr) - 1])
 	sys.stdout.write (ReadString (sock))
-	#SendString (sock, raw_input ("Enter password: "))
-	SendString (sock, sys.stdin.read ())
+	# password
+	sndStr = sys.stdin.readline ()
+	SendString (sock, sndStr[0 : len (sndStr) - 1])
 	sys.stdout.write (ReadString (sock))
 	
 	while True:
-		#SendString (sock, raw_input ("Command: "))
-		SendString (sock, sys.stdin.read ())
+		# to send a command
+		sndStr = sys.stdin.readline ()
+		SendString (sock, sndStr[0 : len (sndStr) - 1])
 		sys.stdout.write ("Results: ")
 		print (ReadString (sock))
 		

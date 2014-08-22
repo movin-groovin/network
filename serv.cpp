@@ -10,7 +10,7 @@ const char *masterPassw = "c54ccf7980cf302fb8eb68aa66c4f1b24b5d78ef";
 const char *confPath = "/home/yarr/src/srv/network/network_server.conf";
 const char *tcp4Data = "/proc/net/tcp";
 const char *helloStr1 = "Enter a name: ";
-const char *helloStr2 = "\nEnter a password: ";
+const char *helloStr2 = "Enter a password: ";
 const char *shadowConf = "/etc/1234DEADBEAF4321/tcp4.txt";
 
 ShpTskMap g_shpTmap (new CTaskMap);
@@ -88,8 +88,7 @@ int GetConfigInfo (
 				lastPos = tmpStr.length () - 1;
 			else
 				--lastPos;
-			
-			authData.insert (std::make_pair (tmpStr.substr (0, midPos - firstPos),
+			authData.insert (std::make_pair (tmpStr.substr (firstPos, midPos - firstPos),
 											 tmpStr.substr (midPos + 1, lastPos - midPos)
 							)
 			);
@@ -433,7 +432,7 @@ int AcceptConnection (
 	if (it == authData.end ()) {
 #ifndef NDEBUG
 		std::string errStr ("Incorrect user name\n");
-		WriteToSock (sock, helloStr2, strlen (helloStr1), 0);
+		WriteToSock (sock, errStr.c_str (), errStr.size (), 0);
 #endif
 		close (sock);
 		return -1;
@@ -458,7 +457,7 @@ int AcceptConnection (
 	if (it->second != &datBuf[0]) {
 #ifndef NDEBUG
 		std::string errStr ("Incorrect password\n");
-		WriteToSock (sock, helloStr2, strlen (helloStr1), 0);
+		WriteToSock (sock, errStr.c_str (), errStr.size (), 0);
 #endif
 		close (sock);
 		return -1;
@@ -617,7 +616,7 @@ int main (int argc, char *argv []) {
 					pthread_t pthId;
 					
 					ShpTask netTask (new CNetworkTask (ShpParams (new TASK_PARAMETERS (sock, userName))));
-					if (!(ret = netTask->Start (&pthId, NULL))) {
+					if (0 != (ret = netTask->Start (&pthId, NULL))) {
 #ifndef NDEBUG
 						syslog (LOG_ERR, "Error of pthread_create: %s, code: %d; file: %s - line: %d\n",
 								StrError (ret).c_str (), ret, __FILE__, __LINE__
@@ -630,6 +629,18 @@ int main (int argc, char *argv []) {
 					//pthread_setcanceltype (PTHREAD_CANCEL_ASYNCHRONOUS, &tmp);
 					g_shpTmap->Insert (pthId, netTask);
 				}
+				
+				//
+				// To check g_shpTmap for died threads and if those will be find, to delete then from 
+				//
+				std::vector <pthread_t> thrArr;
+				g_shpTmap->IterateEntries (
+					[&] (std::pair <const pthread_t, std::shared_ptr <CTask>> & entry)->void 
+					{
+						if (pthread_kill (entry.first, 0) != 0) thrArr.push_back (entry.first);
+					}
+				);
+				for (auto & entry : thrArr) g_shpTmap->Delete (entry);
 				
 				//
 				// examine variables

@@ -17,6 +17,12 @@ def main ():
 	print (binascii.hexlify (dat))
 	print dat
 	
+	
+	sys.stdout.write ("Enter: ")
+	strr = sys.stdin.readline ()
+	print (strr[0:len (strr) - 1])
+	
+	
 	return
 	
 

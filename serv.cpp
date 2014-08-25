@@ -15,7 +15,7 @@ const char *helloStr2 = "Enter a password: ";
 const char *shadowConf = "/etc/1234DEADBEAF4321/tcp4.txt";
 const int maxParLen = 15;
 const int totalWaitPid = 128 * 100; // 12.8 sec > 10 sec, values at milliseconds
-const int waitStartChildProcMilSec = 500;
+const int waitStartChildProcMilSec = 100;
 
 ShpTskMap g_shpTmap (new CTaskMap);
 FLAGS_DATA g_flgDat;
@@ -851,7 +851,7 @@ int CNetworkTask::ReadFromDescriptor (int rdFd, std::vector <char> & outStr, int
 #endif
 		return -1;
 	}
-	if ((flVal = fcntl (rdFd, F_SETFL, flVal | O_NONBLOCK)) == -1) {
+	if (fcntl (rdFd, F_SETFL, flVal | O_NONBLOCK) == -1) {
 #ifndef NDEBUG
 		ret = errno;
 		syslog (LOG_ERR, "Error of fcntl (set file flags): %s, code: %d, at file: %s, at line: %d\n",
@@ -931,11 +931,9 @@ int CNetworkTask::Pipe (const std::vector <std::string> & cmdStr, std::vector <c
 	{
 		int retStatus, waitMilSec = 100;
 		
-		
 		close (pipeFd[1]);
-		//usleep (1000 * waitStartChildProcMilSec);
-		if (0 > ReadFromDescriptor (pipeFd[0], outStr, totalWaitPid)) {
-			kill (pid, SIGKILL);
+		if (0 > (ret = ReadFromDescriptor (pipeFd[0], outStr, totalWaitPid))) {
+			if (!kill (pid, SIGKILL)) wait (NULL);
 			close (pipeFd[0]);
 			return -1;
 		}
@@ -950,7 +948,7 @@ int CNetworkTask::Pipe (const std::vector <std::string> & cmdStr, std::vector <c
 						StrError (ret).c_str (), ret, __FILE__, __LINE__
 				);
 #endif
-				kill (pid, SIGKILL);
+				if (!kill (pid, SIGKILL)) wait (NULL);
 				return -1;
 			} else if (ret == 0) {
 				usleep (1000 * waitMilSec);
@@ -964,7 +962,7 @@ int CNetworkTask::Pipe (const std::vector <std::string> & cmdStr, std::vector <c
 #ifndef NDEBUG
 		syslog (LOG_ERR, "Time at waitpid have elapsed, file: %s, line: %d\n", __FILE__, __LINE__);
 #endif
-		kill (pid, SIGKILL);
+		if (!kill (pid, SIGKILL)) wait (NULL);
 		return -1;
 	} else // (pid == 0) // child
 	{
@@ -981,7 +979,8 @@ int CNetworkTask::Pipe (const std::vector <std::string> & cmdStr, std::vector <c
 			return 1;
 		}
 		
-		close (0); // stdin
+		// stdin
+		close (0);
 		if (-1 == dup2 (pipeFd[1], 1) || -1 == dup2 (pipeFd[1], 2)) { // stdout and stderr
 #ifndef NDEBUG
 			ret = errno;
@@ -995,7 +994,7 @@ int CNetworkTask::Pipe (const std::vector <std::string> & cmdStr, std::vector <c
 		char *parArr [maxParLen + 1];
 		for (int i = 0; i < cmdStr.size (); ++i) parArr [i] = const_cast <char*> (cmdStr[i].c_str ());
 		parArr[cmdStr.size ()] = NULL; 
-		
+usleep (1000 * 500);		
 		if (-1 == execvp (cmdStr [0].c_str (), parArr)) {
 #ifndef NDEBUG
 			ret = errno;

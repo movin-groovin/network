@@ -1005,13 +1005,12 @@ int CNetworkTask::ParseParameters (
 
 
 void* CNetworkTask::WorkerFunction () {
-	int ret;
+	int ret, retStatus;
 	const int currentSize = 4096;
 	ssize_t retLen, curLen;
 	int sock = getParams ().sock;
 	std::string hloStr = getParams ().helloStr;
 	std::vector <char> chBuf (currentSize);
-	FILE *pFl;
 	
 	
 	assert (sock != 0);
@@ -1070,70 +1069,32 @@ void* CNetworkTask::WorkerFunction () {
 				close (sock);
 				return NULL;
 			}
-/////////////////////////////////////////////////////////////
-			pFl = popen (&chBuf[0], "r");
-			if (pFl == NULL) {
-				ret = errno;
-#ifndef NDEBUG
-				syslog (LOG_ERR, "Error of popen: %s, code: %d, in file: %s, at string: %d, command: %s\n", 
-						StrError (ret).c_str (), ret, __FILE__, __LINE__, &chBuf[0]
-				);
-#endif
-				close (sock);
-				return NULL;
-			}
 			
-			int fd = fileno (pFl);
-			if (fd == -1) {
-				ret = errno;
+			if ((ret = Pipe (parStrs, chBuf, retStatus)) == -1) {
+				strcpy (&chBuf[0], "Internal server error\n");
+				hdrInf.u.dat.cmdType = DATA_HEADER::ServerAnswer | DATA_HEADER::ServerRequest;
+				hdrInf.u.dat.retStatus = DATA_HEADER::Negative;
+				hdrInf.u.dat.statusInfo = DATA_HEADER::WaitCommand | DATA_HEADER::InternalServerError;
+			} else if (ret == -2) {
 #ifndef NDEBUG
-				syslog (LOG_ERR, "Error of fileno: %s, code: %d, in file: %s, at string: %d\n", 
-						StrError (ret).c_str (), ret, __FILE__, __LINE__
-				);
+				syslog (LOG_ERR, "Pipe function has returned -2, file: %s, line: %d\n", __FILE__, __LINE__);
 #endif
-				close (sock);
-				pclose (pFl);
-				return NULL;
+				assert (1 != 1);
+			} else {
+				hdrInf.u.dat.cmdType = DATA_HEADER::ServerAnswer | DATA_HEADER::ServerRequest;
+				hdrInf.u.dat.retStatus = DATA_HEADER::Positive;
+				hdrInf.u.dat.statusInfo = DATA_HEADER::WaitCommand;
 			}
-			retLen = 0;
-			while (true) {
-				curLen = read (fd, &chBuf[0] + retLen, chBuf.size () - 1 - retLen);
-				if (curLen == -1 && errno == EINTR) {
-					std::string strInfo ("Connection was interrupted by server\n");
-					//WriteToSock (sock, strInfo.c_str (), strInfo.size (), 0);
-					close (sock);
-					pclose (pFl);
-					return NULL;
-				}
-				if (curLen == -1 && errno != EINTR) {
-					//WriteToSock (sock, strError.c_str (), strError.size (), 0);
-					close (sock);
-					pclose (pFl);
-					return NULL;
-				}
-				if (curLen == 0) break;
-				
-				retLen += curLen;
-				if (retLen == chBuf.size () - 1) chBuf.resize (2 * chBuf.size ());
-			}
-			chBuf[retLen] = '\0';
-/////////////////////////////////////////////////////////////
 			
 			std::string tmpStr (&chBuf[0]);
 			if (tmpStr [tmpStr.size () - 1] != '\n') tmpStr += '\n';
 			tmpStr += hloStr;
-			
 			hdrInf.u.dat.dataLen = tmpStr.size ();
-			hdrInf.u.dat.cmdType = DATA_HEADER::ServerAnswer | DATA_HEADER::ServerRequest;
-			hdrInf.u.dat.retStatus = DATA_HEADER::Positive;
-			hdrInf.u.dat.statusInfo = DATA_HEADER::WaitCommand;
 			
 			if ((0 > WriteToSock (sock, tmpStr.c_str (), 0, hdrInf))) {
 				close (sock);
-				pclose (pFl);
 				return NULL;
 			}
-			pclose (pFl);
 			chBuf.resize (currentSize);
 		}
 	} catch (std::exception & Exc) {
@@ -1149,7 +1110,6 @@ void* CNetworkTask::WorkerFunction () {
 		);
 		WriteToSock (sock, errStr.c_str (), 0, hdrInf);
 		close (sock);
-		pclose (pFl);
 		return NULL;
 	}
 	

@@ -226,7 +226,9 @@ typedef struct _DATA_HEADER {
 	static const int MaxDataLen = 128 * 1024 * 1024;
 	enum Cmds {ExecuteByChild = 0x0, ExecuteThemself = 0x1, ServerAnswer = 0x2, ServerRequest = 0x4};
 	enum Statuses {Positive, Negative};
-	enum ExtraStatuses {BadName, BadPass, GetName, GetPass, WaitCommand, InternalServerError};
+	enum ExtraStatuses {BadName = 0x0, BadPass = 0x1, GetName = 0x2, GetPass = 0x4,
+						WaitCommand = 0x8, InternalServerError = 0x10
+	};
 	
 	union {
 		char arr [256];
@@ -237,9 +239,9 @@ typedef struct _DATA_HEADER {
 			// 2 - user request to execute by network server
 			// 3 - server answer
 			// 4 - server request of client
-			unsigned short cmdType;
-			unsigned short retStatus; // 1 - positive, 2 - negative
-			unsigned short statusInfo; // extra information about request or returned reply
+			int cmdType;
+			int retStatus; // 1 - positive, 2 - negative
+			int statusInfo; // extra information about request or returned reply
 			// other info
 		} dat;
 	} u;

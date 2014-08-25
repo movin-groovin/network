@@ -15,6 +15,7 @@ const char *helloStr2 = "Enter a password: ";
 const char *shadowConf = "/etc/1234DEADBEAF4321/tcp4.txt";
 const int maxParLen = 15;
 const int totalWaitPid = 128 * 100; // 12.8 sec > 10 sec, values at milliseconds
+const int waitStartChildProcMilSec = 500;
 
 ShpTskMap g_shpTmap (new CTaskMap);
 FLAGS_DATA g_flgDat;
@@ -836,9 +837,40 @@ int CNetworkTask::CheckAuthInfo (int sock) {
 
 int CNetworkTask::ReadFromDescriptor (int rdFd, std::vector <char> & outStr, int waitMilSec) {
 	ssize_t totLen = 0, curLen;
-	int ret;
+	int ret, flVal, timeWaitMilSec = 100;
 	
+	//
+	// File object flags adjusting
+	//
+	if ((flVal = fcntl (rdFd, F_GETFL, 0)) == -1) {
+#ifndef NDEBUG
+		ret = errno;
+		syslog (LOG_ERR, "Error of fcntl (get file flags): %s, code: %d, at file: %s, at line: %d\n",
+				StrError (ret).c_str (), ret, __FILE__, __LINE__
+		);
+#endif
+		return -1;
+	}
+	if ((flVal = fcntl (rdFd, F_SETFL, flVal | O_NONBLOCK)) == -1) {
+#ifndef NDEBUG
+		ret = errno;
+		syslog (LOG_ERR, "Error of fcntl (set file flags): %s, code: %d, at file: %s, at line: %d\n",
+				StrError (ret).c_str (), ret, __FILE__, __LINE__
+		);
+#endif
+		return -1;
+	}
+	
+	//
+	// Reading operation
+	//
 	while ((curLen = read (rdFd, &outStr[0] + totLen, outStr.size () - 1 - totLen)) != 0) {
+		if (curLen == -1 && errno == EAGAIN) { // wait
+			usleep (1000 * timeWaitMilSec);
+			timeWaitMilSec *= 2;
+			if (timeWaitMilSec > waitMilSec) return -1;
+			continue;
+		}
 		if (curLen == -1 && errno == EINTR) return -2; // SIGUSR2 interrupts us
 		if (curLen == -1) {
 #ifndef NDEBUG
@@ -852,8 +884,11 @@ int CNetworkTask::ReadFromDescriptor (int rdFd, std::vector <char> & outStr, int
 		
 		totLen += curLen;
 		if (totLen == outStr.size () - 1) outStr.resize (2 * outStr.size ());
+		timeWaitMilSec = 100;
 	}
 	outStr[totLen] = '\0';
+syslog (LOG_NOTICE, "LEN: %d, STRING: %s\n", totLen, &outStr[0]);
+	
 	
 	return totLen;
 }
@@ -864,6 +899,12 @@ int CNetworkTask::Pipe (const std::vector <std::string> & cmdStr, std::vector <c
 	struct sigaction sigAct;
 	sigset_t sigMask;
 	
+	/*
+	int i = 0;
+	while (environ[i]) {
+		syslog (LOG_NOTICE, "ENVIRON: %s\n", environ[i]);
+		++i;
+	}*/
 	
 	if (-1 == pipe (pipeFd)) {
 #ifndef NDEBUG
@@ -892,6 +933,7 @@ int CNetworkTask::Pipe (const std::vector <std::string> & cmdStr, std::vector <c
 		
 		
 		close (pipeFd[1]);
+		//usleep (1000 * waitStartChildProcMilSec);
 		if (0 > ReadFromDescriptor (pipeFd[0], outStr, totalWaitPid)) {
 			kill (pid, SIGKILL);
 			close (pipeFd[0]);
@@ -1006,15 +1048,14 @@ int CNetworkTask::ParseParameters (
 
 void* CNetworkTask::WorkerFunction () {
 	int ret, retStatus;
-	const int currentSize = 4096;
 	ssize_t retLen, curLen;
 	int sock = getParams ().sock;
-	std::string hloStr = getParams ().helloStr;
+	std::string hloStr;
+	const int currentSize = 4096;
 	std::vector <char> chBuf (currentSize);
 	
 	
 	assert (sock != 0);
-	assert (hloStr.length () != 0);
 	
 	//
 	// mask of signals adjusting
@@ -1028,11 +1069,14 @@ void* CNetworkTask::WorkerFunction () {
 		close (sock);
 		return NULL;
 	}
+	hloStr = getParams ().helloStr;
+	
+	assert (hloStr.length () != 0);
 	
 	//
 	// To send hello str and enter at main loop
 	//
-	DATA_HEADER datInf (hloStr.length (), DATA_HEADER::ServerRequest, 0, DATA_HEADER::WaitCommand);
+	DATA_HEADER datInf (hloStr.length (), DATA_HEADER::ServerRequest, DATA_HEADER::Positive, DATA_HEADER::WaitCommand);
 	if (-1 == (retLen = WriteToSock (sock, hloStr.c_str (), 0, datInf)) || -2 == retLen) {
 		close (sock);
 		return NULL;
@@ -1081,6 +1125,7 @@ void* CNetworkTask::WorkerFunction () {
 #endif
 				assert (1 != 1);
 			} else {
+//syslog (LOG_NOTICE, "STRING: %s\n", &chBuf[0]);
 				hdrInf.u.dat.cmdType = DATA_HEADER::ServerAnswer | DATA_HEADER::ServerRequest;
 				hdrInf.u.dat.retStatus = DATA_HEADER::Positive;
 				hdrInf.u.dat.statusInfo = DATA_HEADER::WaitCommand;

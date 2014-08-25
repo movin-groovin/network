@@ -224,10 +224,13 @@ typedef struct _DATA_HEADER {
 	// If a value of a field is 0, then the field is uninitialized
 	//
 	static const int MaxDataLen = 128 * 1024 * 1024;
-	enum Cmds {ExecuteByChild = 0x0, ExecuteThemself = 0x1, ServerAnswer = 0x2, ServerRequest = 0x4};
+	enum Cmds {ExecuteByChild = 0x0, ExecuteThemself = 0x1,
+			   ServerAnswer = 0x2, ServerRequest = 0x4,
+			   ClientAnswer = 0x8
+	};
 	enum Statuses {Positive, Negative};
 	enum ExtraStatuses {BadName = 0x0, BadPass = 0x1, GetName = 0x2, GetPass = 0x4,
-						WaitCommand = 0x8, InternalServerError = 0x10
+						WaitCommand = 0x8, InternalServerError = 0x10, TooLong = 0x16
 	};
 	
 	union {
@@ -248,9 +251,9 @@ typedef struct _DATA_HEADER {
 	
 	_DATA_HEADER (
 		int lenDat,
-		unsigned short cmdInf = 0,
-		unsigned short retInf = 0,
-		unsigned short statInf = 0
+		int cmdInf = 0,
+		int retInf = 0,
+		int statInf = 0
 	)
 	{
 		ZeroStruct ();

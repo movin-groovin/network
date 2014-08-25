@@ -18,6 +18,7 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <poll.h>
+#include <sys/wait.h>
 
 
 //
@@ -98,11 +99,17 @@ public:
 
 typedef struct _TASK_PARAMETERS {
 public:
-	_TASK_PARAMETERS (int sck = 0, const std::string & str = ""): sock (sck), helloStr (str) {}
+	_TASK_PARAMETERS (
+		int sck = 0,
+		const std::unordered_map <std::string, std::string> & authDat = 
+			std::unordered_map <std::string, std::string> (),
+		const std::string & str = ""
+	): sock (sck), helloStr (str), authData (authDat) {}
 
 public:
 	std::string helloStr;
 	int sock;
+	std::unordered_map <std::string, std::string> authData;
 } TASK_PARAMETERS, *PTASK_PARAMETERS;
 
 
@@ -118,7 +125,7 @@ private:
 	std::shared_ptr <TASK_PARAMETERS> m_tskParams;
 
 protected:
-	const TASK_PARAMETERS & getParams () const {
+	TASK_PARAMETERS & getParams () const {
 		return *m_tskParams;
 	}
 	CTask (ParamPars pars): m_tskParams (pars) {}
@@ -160,6 +167,12 @@ public:
 	CNetworkTask (ParamPars pars): CTask (pars) {}
 	void* WorkerFunction ();
 	
+	int CommandsCheck (int sock, const std::string & cmd);
+	int AdjustSignals ();
+	int CheckAuthInfo (int sock);
+	int Pipe (const std::vector <std::string> & cmdStr, std::vector <char> & outStr, int & retValue);
+	int ReadFromDescriptor (int rdFd, std::vector <char> & outStr, int waitMilSec);
+	int ParseParameters (const std::vector <char> & chBuf, std::vector <std::string> & parStrs);
 };
 
 
@@ -208,14 +221,44 @@ typedef struct _DATA_HEADER {
 	//
 	// Information interchange between client and server exist of 256
 	// bytes header and useful data straight after the header
+	// If a value of a field is 0, then the field is uninitialized
 	//
+	static const int MaxDataLen = 128 * 1024 * 1024;
+	enum Cmds {ExecuteByChild = 0x0, ExecuteThemself = 0x1, ServerAnswer = 0x2, ServerRequest = 0x4};
+	enum Statuses {Positive, Negative};
+	enum ExtraStatuses {BadName, BadPass, GetName, GetPass, WaitCommand, InternalServerError};
+	
 	union {
 		char arr [256];
 		struct {
 			int dataLen; // the lenght of useful data, behind the header
+			// command type
+			// 1 - user request to execute by child process
+			// 2 - user request to execute by network server
+			// 3 - server answer
+			// 4 - server request of client
+			unsigned short cmdType;
+			unsigned short retStatus; // 1 - positive, 2 - negative
+			unsigned short statusInfo; // extra information about request or returned reply
 			// other info
 		} dat;
 	} u;
+	
+	_DATA_HEADER (
+		int lenDat,
+		unsigned short cmdInf = 0,
+		unsigned short retInf = 0,
+		unsigned short statInf = 0
+	)
+	{
+		ZeroStruct ();
+		u.dat.dataLen = lenDat;
+		u.dat.cmdType = cmdInf;
+		u.dat.retStatus = retInf;
+		u.dat.statusInfo = statInf;
+	}
+	
+	void ZeroStruct () {memset (&u, 0, sizeof (_DATA_HEADER));}
 } DATA_HEADER, *PDATA_HEADER;
 
 /*

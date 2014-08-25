@@ -72,9 +72,14 @@ def main ():
 	while True:
 		# to send a command
 		sndStr = sys.stdin.readline ()
+		if sndStr[0:len (sndStr) - 1] == "exit":
+			SendString (sock, sndStr[0 : len (sndStr) - 1])
+			sys.stdout.write ("Results: {strr}".format (strr = ReadString (sock)))
+			return
+			
 		SendString (sock, sndStr[0 : len (sndStr) - 1])
-		sys.stdout.write ("Results: ")
-		print (ReadString (sock))
+		#sys.stdout.write ("Results: ")
+		sys.stdout.write ("Results: {strr}".format (strr = ReadString (sock)))
 		
 	print ("=====================")
 	#http://pymotw.com/2/struct/

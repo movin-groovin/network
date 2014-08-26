@@ -21,6 +21,7 @@
 #include <sys/wait.h>
 
 
+
 //
 // Function prototypes
 //
@@ -29,6 +30,7 @@ std::string StrError (int errCode);
 // CallFunc is a friend function of class CTask and defined there
 //
 void* CallFunc (void * pvPtr);
+
 
 //
 // Class  declarations
@@ -221,16 +223,18 @@ typedef struct _DATA_HEADER {
 	//
 	// Information interchange between client and server exist of 256
 	// bytes header and useful data straight after the header
-	// If a value of a field is 0, then the field is uninitialized
 	//
 	static const int MaxDataLen = 128 * 1024 * 1024;
-	enum Cmds {ExecuteByChild = 0x0, ExecuteThemself = 0x1,
-			   ServerAnswer = 0x2, ServerRequest = 0x4,
-			   ClientAnswer = 0x8
+	enum Cmds {ExecuteCommand = 0x0, ServerAnswer = 0x1,
+			   ServerRequest = 0x2, ClientAnswer = 0x4,
+			   ClientRequest = 0x8
 	};
-	enum Statuses {Positive, Negative};
-	enum ExtraStatuses {BadName = 0x0, BadPass = 0x1, GetName = 0x2, GetPass = 0x4,
-						WaitCommand = 0x8, InternalServerError = 0x10, TooLong = 0x16
+	enum Statuses {Positive = 0x0, Negative = 0x1,
+				   CanContinue = 0x2
+	};
+	enum ExtraStatuses {NoStatus = 0, BadName = 1,
+						BadPass = 2, InternalServerError = 3,
+						TooLong = 4, InteractionFin = 5
 	};
 	
 	union {
@@ -244,7 +248,7 @@ typedef struct _DATA_HEADER {
 			// 4 - server request of client
 			int cmdType;
 			int retStatus; // 1 - positive, 2 - negative
-			int statusInfo; // extra information about request or returned reply
+			int retExtraStatus; // extra information about request or returned reply
 			// other info
 		} dat;
 	} u;
@@ -260,7 +264,7 @@ typedef struct _DATA_HEADER {
 		u.dat.dataLen = lenDat;
 		u.dat.cmdType = cmdInf;
 		u.dat.retStatus = retInf;
-		u.dat.statusInfo = statInf;
+		u.dat.retExtraStatus = statInf;
 	}
 	
 	void ZeroStruct () {memset (&u, 0, sizeof (_DATA_HEADER));}
@@ -284,6 +288,13 @@ typedef typename CTask::ParamPars ShpParams;
 //typedef std::shred_ptr <COND_DATA> ShpCondWait;
 typedef std::shared_ptr <CTask> ShpTask;
 typedef std::shared_ptr <CTaskMap> ShpTskMap;
+
+
+//
+// Function prototypes
+//
+int CheckHeader (DATA_HEADER & hdrInf);
+
 
 
 

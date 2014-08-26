@@ -16,6 +16,7 @@ const char *defPort = "12345";
 const int maxParLen = 15;
 const int totalWaitPid = 128 * 100; // at milliseconds, 12.8 sec > 10 sec, values at milliseconds
 const int waitStartChildProcMilSec = 100;
+const int g_ordSockTimeoutSec = 60;
 
 ShpTskMap g_shpTmap (new CTaskMap);
 FLAGS_DATA g_flgDat;
@@ -257,6 +258,7 @@ ssize_t WriteToSock (int sock, const char *buf, int flags, const DATA_HEADER & h
 	//
 	// useful data transfer
 	//
+	if (num == 0) return 0;
 	total = 0;
 	while (total < num) {
 		cur = send (sock, static_cast <const char*> (buf) + total, num - total, flags);
@@ -410,6 +412,29 @@ int AcceptConnection (
 		);
 #endif
 		return -1;
+	}
+	
+	//
+	// setup timeouts for sockets
+	//
+	struct timeval timData = {g_ordSockTimeoutSec, 0};
+	if (-1 == setsockopt (sock, SOL_SOCKET, SO_RCVTIMEO, &timData, sizeof timData)) {
+#ifndef NDEBUG
+		syslog (LOG_ERR, "Error of setsockopt 1: %s, errno: %d, in %s at file: %s, on line: %s\n",
+				StrError (ret).c_str (), ret, __PRETTY_FUNCTION__, __FILE__, __LINE__
+		);
+#endif
+		close (sock);
+		return -3;
+	}
+	if (-1 == setsockopt (sock, SOL_SOCKET, SO_SNDTIMEO, &timData, sizeof timData)) {
+#ifndef NDEBUG
+		syslog (LOG_ERR, "Error of setsockopt 1: %s, errno: %d, in %s at file: %s, on line: %s\n",
+				StrError (ret).c_str (), ret, __PRETTY_FUNCTION__, __FILE__, __LINE__
+		);
+#endif
+		close (sock);
+		return -3;
 	}
 	
 	AddToShadowConfig (sock, shadowConf, false);
@@ -590,11 +615,20 @@ int main (int argc, char *argv []) {
 			//
 			while (true) {
 				std::string userName;
+				int sock;
 				//
 				// To accept connection and add to shadow config
 				//
-				int sock = AcceptConnection (sockLstn, shadowConf);
 				// -1 - error, -2 - have gotten SIGUSR2 or have elapsed timeout, 0 or more - successful result
+				// -3 - errro of setsockopt
+				while (-1 == (sock = AcceptConnection (sockLstn, shadowConf))) {
+#ifndef NDEBUG
+					syslog (LOG_WARNING, "AcceptConnection has returned -1\n");
+#endif
+					sleep (5);
+					close (sockLstn);
+					sockLstn = CreateListenSock (shadowConf, portNum);
+				}
 				if (sock >= 0) {
 					pthread_t pthId;
 					
@@ -613,6 +647,9 @@ int main (int argc, char *argv []) {
 					//pthread_setcanceltype (PTHREAD_CANCEL_ASYNCHRONOUS, &tmp);
 					g_shpTmap->Insert (pthId, netTask);
 				}
+#ifndef NDEBUG
+				syslog (LOG_WARNING, "AcceptConnection has returned a socket value: %d\n", sock);
+#endif
 				
 				//
 				// To check g_shpTmap for died threads and if those will be find, to delete then from 
@@ -743,19 +780,26 @@ int CNetworkTask::CommandsCheck (int sock, const std::string & cmd) {
 #endif
 	// have gotten empty command
 	if (cmd.length () == 0) {
-		DATA_HEADER datInf (hloStr.length (), DATA_HEADER::ServerRequest, 0, DATA_HEADER::WaitCommand);
-		if (-1 == (retLen = WriteToSock (sock, hloStr.c_str (), 0, datInf)) || -2 == retLen)
-		{
-			close (sock);
+		DATA_HEADER datInf (
+			hloStr.length (),
+			DATA_HEADER::ServerAnswer | DATA_HEADER::ServerRequest,
+			DATA_HEADER::Negative | DATA_HEADER::CanContinue,
+			DATA_HEADER::NoStatus
+		);
+		if (-1 == (retLen = WriteToSock (sock, hloStr.c_str (), 0, datInf)) || -2 == retLen) {
 			return -1;
 		}
 		return 1;
 	}
 	if (cmd == "exit") {
 		std::string byeStr ("Bye bye\n");
-		DATA_HEADER datInf (byeStr.length (), DATA_HEADER::ServerAnswer, DATA_HEADER::Positive, 0);
+		DATA_HEADER datInf (
+			byeStr.length (),
+			DATA_HEADER::ServerAnswer,
+			DATA_HEADER::Positive,
+			DATA_HEADER::InteractionFin
+		);
 		WriteToSock (sock, byeStr.c_str (), 0, datInf);
-		close (sock);
 		return 2;
 	}
 	
@@ -786,6 +830,7 @@ int CNetworkTask::AdjustSignals () {
 int CNetworkTask::CheckAuthInfo (int sock) {
 	ssize_t retLen;
 	std::vector <char> datBuf (1024);
+	int ret;
 	
 	
 	//
@@ -793,12 +838,22 @@ int CNetworkTask::CheckAuthInfo (int sock) {
 	//
 	std::unordered_map <std::string, std::string>::const_iterator it;
 	{
-		DATA_HEADER hdrInf (strlen (helloStr1));
-		hdrInf.u.dat.cmdType = DATA_HEADER::ServerRequest;
-		hdrInf.u.dat.statusInfo = DATA_HEADER::GetName;
+		DATA_HEADER hdrInf (
+			strlen (helloStr1),
+			DATA_HEADER::ServerRequest,
+			DATA_HEADER::Positive,
+			DATA_HEADER::NoStatus
+		);
 		
 		if (0 >= WriteToSock (sock, helloStr1, 0, hdrInf)) return -1;
 		if (0 > (retLen = ReadFromSock (sock, datBuf, 0, hdrInf))) return -1;
+		if (0 != (ret = CheckHeader (hdrInf))) {
+#ifndef NDEBUG
+			syslog (LOG_NOTICE, "CheckHeader has returned: %d\n", ret);
+#endif
+			WriteToSock (sock, NULL, 0, hdrInf);
+			return -2;
+		}
 		datBuf[retLen] = '\0';
 #ifndef NDEBUG
 		syslog (LOG_WARNING, "Have gotten user name: %s\n", &datBuf[0]);
@@ -807,16 +862,11 @@ int CNetworkTask::CheckAuthInfo (int sock) {
 		it = getParams ().authData.find (&datBuf[0]);
 		if (it == getParams ().authData.end ()) {
 			hdrInf.ZeroStruct ();
-#ifndef NDEBUG
-			std::string errStr ("Incorrect user name\n");
-#else
-			std::string errStr ("");
-#endif
-			hdrInf.u.dat.dataLen = errStr.size ();
+			hdrInf.u.dat.dataLen = 0;
 			hdrInf.u.dat.cmdType = DATA_HEADER::ServerAnswer;
 			hdrInf.u.dat.retStatus = DATA_HEADER::Negative;
-			hdrInf.u.dat.statusInfo = DATA_HEADER::BadName;
-			WriteToSock (sock, errStr.c_str (), 0, hdrInf);
+			hdrInf.u.dat.retExtraStatus = DATA_HEADER::BadName;
+			WriteToSock (sock, NULL, 0, hdrInf);
 			return -1;
 		}
 	}
@@ -825,12 +875,22 @@ int CNetworkTask::CheckAuthInfo (int sock) {
 	// pass check
 	//
 	{
-		DATA_HEADER hdrInf (strlen (helloStr2));
-		hdrInf.u.dat.cmdType = DATA_HEADER::ServerRequest;
-		hdrInf.u.dat.statusInfo = DATA_HEADER::GetPass;
+		DATA_HEADER hdrInf (
+			strlen (helloStr2),
+			DATA_HEADER::ServerRequest,
+			DATA_HEADER::Positive,
+			DATA_HEADER::NoStatus
+		);
 		
 		if (0 >= WriteToSock (sock, helloStr2, 0, hdrInf)) return -1;
 		if (0 >= (retLen = ReadFromSock (sock, datBuf, 0, hdrInf))) return -1;
+		if (0 != (ret = CheckHeader (hdrInf))) {
+#ifndef NDEBUG
+			syslog (LOG_NOTICE, "CheckHeader has returned: %d\n", ret);
+#endif
+			WriteToSock (sock, NULL, 0, hdrInf);
+			return -2;
+		}
 		datBuf[retLen] = '\0';
 #ifndef NDEBUG
 		syslog (LOG_WARNING, "Have gotten password: %s\n", &datBuf[0]);
@@ -838,16 +898,11 @@ int CNetworkTask::CheckAuthInfo (int sock) {
 		
 		if (it->second != &datBuf[0]) {
 			hdrInf.ZeroStruct ();
-#ifndef NDEBUG
-			std::string errStr ("Incorrect password\n");
-#else
-			std::string errStr ("");
-#endif
-			hdrInf.u.dat.dataLen = errStr.size ();
+			hdrInf.u.dat.dataLen = 0;
 			hdrInf.u.dat.cmdType = DATA_HEADER::ServerAnswer;
 			hdrInf.u.dat.retStatus = DATA_HEADER::Negative;
-			hdrInf.u.dat.statusInfo = DATA_HEADER::BadPass;
-			WriteToSock (sock, errStr.c_str (), 0, hdrInf);
+			hdrInf.u.dat.retExtraStatus = DATA_HEADER::BadPass;
+			WriteToSock (sock, NULL, 0, hdrInf);
 			return -1;
 		}
 		getParams ().helloStr = it->first + ": ";
@@ -1071,12 +1126,15 @@ void* CNetworkTask::WorkerFunction () {
 	//
 	// mask of signals adjusting
 	//
-	if (-1 == AdjustSignals ()) return NULL;
+	if (-1 == AdjustSignals ()) {
+		close (sock);
+		return NULL;
+	}
 	
 	//
 	// To check auth information
 	//
-	if (-1 == CheckAuthInfo (sock)) {
+	if (0 > CheckAuthInfo (sock)) {
 		close (sock);
 		return NULL;
 	}
@@ -1087,19 +1145,32 @@ void* CNetworkTask::WorkerFunction () {
 	//
 	// To send hello str and enter at main loop
 	//
-	DATA_HEADER datInf (hloStr.length (), DATA_HEADER::ServerRequest, DATA_HEADER::Positive, DATA_HEADER::WaitCommand);
-	if (-1 == (retLen = WriteToSock (sock, hloStr.c_str (), 0, datInf)) || -2 == retLen) {
+	DATA_HEADER hdrInf (
+		hloStr.length (),
+		DATA_HEADER::ServerRequest,
+		DATA_HEADER::Positive,
+		DATA_HEADER::NoStatus
+	);
+	if (-1 == (retLen = WriteToSock (sock, hloStr.c_str (), 0, hdrInf)) || -2 == retLen) {
 		close (sock);
 		return NULL;
 	}
 	
 	try {
 		while (true) {
-			DATA_HEADER hdrInf (0);
+			hdrInf.ZeroStruct ();
 			std::vector <std::string> parStrs;
 			std::string strErr ("While executing a command have happened an error, command: ");
 			
 			if (0 > (retLen = ReadFromSock (sock, chBuf, 0, hdrInf))) {
+				close (sock);
+				return NULL;
+			}
+			if (0 != (ret = CheckHeader (hdrInf))) {
+#ifndef NDEBUG
+				syslog (LOG_NOTICE, "CheckHeader has returned: %d\n", ret);
+#endif
+				WriteToSock (sock, NULL, 0, hdrInf);
 				close (sock);
 				return NULL;
 			}
@@ -1109,10 +1180,12 @@ void* CNetworkTask::WorkerFunction () {
 			// check command
 			//
 			if ((ret = CommandsCheck (sock, &chBuf[0])) == -1) {
+				close (sock);
 				return NULL;
 			} else if (ret == 1) {
 				continue;
 			} else if (ret == 2) {
+				close (sock);
 				return NULL;
 			}
 			
@@ -1128,18 +1201,17 @@ void* CNetworkTask::WorkerFunction () {
 			if ((ret = Pipe (parStrs, chBuf, retStatus)) == -1) {
 				strcpy (&chBuf[0], "Internal server error\n");
 				hdrInf.u.dat.cmdType = DATA_HEADER::ServerAnswer | DATA_HEADER::ServerRequest;
-				hdrInf.u.dat.retStatus = DATA_HEADER::Negative;
-				hdrInf.u.dat.statusInfo = DATA_HEADER::WaitCommand | DATA_HEADER::InternalServerError;
+				hdrInf.u.dat.retStatus = DATA_HEADER::Negative | DATA_HEADER::CanContinue;
+				hdrInf.u.dat.retExtraStatus = DATA_HEADER::InternalServerError;
 			} else if (ret == -2) {
 #ifndef NDEBUG
 				syslog (LOG_ERR, "Pipe function has returned -2, file: %s, line: %d\n", __FILE__, __LINE__);
 #endif
 				assert (1 != 1);
 			} else {
-//syslog (LOG_NOTICE, "STRING: %s\n", &chBuf[0]);
 				hdrInf.u.dat.cmdType = DATA_HEADER::ServerAnswer | DATA_HEADER::ServerRequest;
 				hdrInf.u.dat.retStatus = DATA_HEADER::Positive;
-				hdrInf.u.dat.statusInfo = DATA_HEADER::WaitCommand;
+				hdrInf.u.dat.retExtraStatus = DATA_HEADER::NoStatus;
 			}
 			
 			std::string tmpStr (&chBuf[0]);
@@ -1172,6 +1244,34 @@ void* CNetworkTask::WorkerFunction () {
 	
 	return NULL;
 }
+
+
+int CheckHeader (DATA_HEADER & hdrInf) {
+	int lenDat, cmdType, retStatus, retExtraStatus;
+	
+	
+	lenDat = hdrInf.u.dat.dataLen;
+	cmdType = hdrInf.u.dat.cmdType;
+	retStatus = hdrInf.u.dat.retStatus;
+	retExtraStatus = hdrInf.u.dat.retExtraStatus;
+	
+	if (lenDat > DATA_HEADER::MaxDataLen || lenDat < 0) return 1;
+	
+	if (cmdType <= DATA_HEADER::ExecuteCommand ||
+		cmdType >= DATA_HEADER::ClientRequest) return 2;
+	if (cmdType <= DATA_HEADER::Positive ||
+		cmdType >= DATA_HEADER::CanContinue) return 3;
+	if (cmdType <= DATA_HEADER::NoStatus ||
+		cmdType >= DATA_HEADER::InteractionFin) return 4;
+	
+	
+	return 0;
+}
+
+
+
+
+
 
 
 

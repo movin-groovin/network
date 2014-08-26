@@ -5,154 +5,255 @@
 import sys, os, socket, struct, binascii
 
 
-g_headerSize = 256
-g_MaxDataLen = 128 * 1024 * 1024
-g_intLen = 4
-g_waitSecs = 30
-g_waitMilSecs = 0
 
-ExecuteByChild = 0x0
-ExecuteThemself = 0x1
-ServerAnswer = 0x2
-ServerRequest = 0x4
-ClientAnswer = 0x8
-
-Positive = 0
-Negative = 1
-
-BadName = 0x0
-BadPass = 0x1
-GetName = 0x2
-GetPass = 0x4,
-WaitCommand = 0x8
-InternalServerError = 0x10
-TooLong = 0x16
+WAITSECS = 30
+WAITMILSECS = 0
 
 
 
-def SendString (s, strDat, cmdType = 0, retStatus = 0, infStatus = 0):
-	if len (strDat) > g_MaxDataLen:
-		if __debug__: raise Exception ("Too long data for transfering")
-	#print ("WRITE: ", strDat, cmdType, retStatus, infStatus)
+class CNetwork (object):
+	"""The class for network operations. (thanks cap !)"""
+	headerSize = 256
+	MaxDataLen = 128 * 1024 * 1024
+	intLen = 4
+
+	ExecuteCommand = 0x0
+	ServerAnswer = 0x1
+	ServerRequest = 0x2
+	ClientAnswer = 0x4
+	ClientRequest = 0x8
+
+	Positive = 0x0
+	Negative = 0x1
+	CanContinue = 0x2
+
+	NoStatus = 0
+	BadName = 1
+	BadPass = 2
+	InternalServerError = 3
+	TooLong = 4
+	InteractionFin = 5
 	
-	data = struct.pack ("i", len (strDat))
-	data += struct.pack ("i", cmdType)
-	data += struct.pack ("i", retStatus)
-	data += struct.pack ("i", infStatus)
-	data += struct.pack ("B", 0) * (g_headerSize - len (data))
-	data += strDat
-	#print binascii.hexlify (data)
 	
-	totLen = 0
-	while totLen < len (data):
-		ret = s.send (data[totLen : len (data)])
-		totLen += ret
+	def __init__ (self, hostStr, portStr, waitSec, waitMilSec):
+		if 1 != 1:
+			print ("Hello Crotchy !")
 		
-	return totLen
-
-
-def ReadString (s):
-	data = ""
-	totLen = 0
-	
-	while True:
-		ret = s.recv (g_headerSize - totLen)
-		totLen += len (ret)
-		data += ret
-		if totLen == g_headerSize: break
-	#print binascii.hexlify (data)
-	
-	totLen = struct.unpack ("i", data[0:4])[0]
-	cmdType = struct.unpack ("i", data[4:8])[0]
-	retStatus = struct.unpack ("i", data[8:12])[0]
-	infStatus = struct.unpack ("i", data[12:16])[0]
-	#print ("READ: ", totLen, cmdType, retStatus, infStatus)
-	#print (type (totLen))
-	#print (totLen)
-	if totLen > g_MaxDataLen:
-		SendString (s, "Too long data for transfering", ClientAnswer, Negative, TooLong)
-		if __debug__: raise Exception ("Too long data for acceptance")
-		else: return -1, ServerAnswer, Negative, TooLong, ""
-	
-	data = ""
-	while totLen > 0:
-		ret = s.recv (totLen)
-		totLen -= len (ret)
-		data += ret
+		self.sock = socket.socket (socket.AF_INET, socket.SOCK_STREAM)
+		# for pack method we must transfer "LL", not "ii" - it's an undocumented feature at py-docs
+		timeVal = struct.pack ("LL", waitSec, 1000 * waitMilSec)
+		self.sock.setsockopt (socket.SOL_SOCKET, socket.SO_RCVTIMEO, timeVal)
+		self.sock.setsockopt (socket.SOL_SOCKET, socket.SO_SNDTIMEO, timeVal)
+		# connect method accepts a tuple, not 2 parameters
+		self.sock.connect ((hostStr, int (portStr)))
 		
-	return totLen, cmdType, retStatus, infStatus, data
-
+		return
+	
+	def SendString (self, parsLst):
+		# strDat, cmdType, retStatus, retExtraStatus - in parsLst
+		
+		data = struct.pack ("i", len (parsLst[0]))
+		data += struct.pack ("i", parsLst[1])
+		data += struct.pack ("i", parsLst[2])
+		data += struct.pack ("i", parsLst[3])
+		data += struct.pack ("B", 0) * (CNetwork.headerSize - len (data))
+		data += parsLst[0]
+		#print binascii.hexlify (data)
+		if __debug__:
+			if self.CheckFormatHeader ([len (parsLst[0]), parsLst[1], parsLst[2], parsLst[3]]) != 0:
+				raise Exception ("Uncorrect format of a header at SendString")
+		
+		totLen = 0
+		while totLen < len (data):
+			ret = self.sock.send (data[totLen : len (data)])
+			totLen += ret
+			
+		return totLen - CNetwork.headerSize
+	
+	
+	def ReadString (self):
+		data = ""
+		totLen = 0
+		
+		while True:
+			ret = self.sock.recv (CNetwork.headerSize - totLen)
+			totLen += len (ret)
+			data += ret
+			if totLen == CNetwork.headerSize: break
+		#print binascii.hexlify (data)
+		
+		totLen = struct.unpack ("i", data[0:4])[0]
+		cmdType = struct.unpack ("i", data[4:8])[0]
+		retStatus = struct.unpack ("i", data[8:12])[0]
+		retExtraStatus = struct.unpack ("i", data[12:16])[0]
+		
+		ret = self.CheckFormatHeader ([totLen, cmdType, retStatus, retExtraStatus])
+		if 0 != ret:
+			print ("Not correct header, ret of CheckHeader: {par}".format (par = ret))
+			return -1, cmdType, retStatus, retExtraStatus
+		
+		data = ""
+		while totLen > 0:
+			ret = self.sock.recv (totLen)
+			totLen -= len (ret)
+			data += ret
+			
+		return [data, cmdType, retStatus, retExtraStatus]
+	
+	
+	def CheckFormatHeader (self, hdrInternalsList):
+		# len, cmdType, status, extraStatus
+		lenData = hdrInternalsList[0]
+		cmdType = hdrInternalsList[1]
+		retStatus = hdrInternalsList[2]
+		retExtraStatus = hdrInternalsList[3]
+		
+		if cmdType < CNetwork.ExecuteCommand or cmdType > CNetwork.ClientRequest:
+			print ("Not correct cmd type")
+			return 2
+		
+		if retStatus < CNetwork.Positive or retStatus > CNetwork.CanContinue:
+			print ("Not correct ret status")
+			return 3
+		
+		if retExtraStatus < CNetwork.NoStatus or retExtraStatus > CNetwork.InteractionFin:
+			print ("Not correct ret extra status")
+			return 4
+		
+		return 0
+	
+	
+	def CheckLogicallyHeader (self, hdrInternalsList):
+		# len, cmdType, status, extraStatus
+		lenData = hdrInternalsList[0]
+		cmdType = hdrInternalsList[1]
+		retStatus = hdrInternalsList[2]
+		retExtraStatus = hdrInternalsList[3]
+		
+		if lenData > CNetwork.MaxDataLen:
+			print ("Have received data too long: {bts} bytes".format (bts = lenData))
+			return 1
+		
+		if (retStatus & CNetwork.Negative) and (not (retStatus & CNetwork.CanContinue)):
+			print ("Server has returned fatal error, we can't continue processing, status:"
+				   " {0}, extra-status: {1}". format (retStatus, retExtraStatus))
+			return 2
+		
+		return 0
+	
+	
+	
+class CApplication (object):
+	"""The class for data interchange with the server"""
+	def __init__ (self):
+		self.one = 1
+	
+	
+	def AuthInfoTransfer (self, netObj, userName, passStr):
+		# first string from server
+		ret = netObj.ReadString ()
+		if -1 == ret[0]:
+			print ("Format error of header")
+			return 1
+		if 0 != netObj.CheckLogicallyHeader ([len (ret[0])] + ret [1 : len (ret)]):
+			return 2
+		sys.stdout.write (ret[0])
+		
+		# login name
+		sndStr = sys.stdin.readline ()
+		netObj.SendString (
+			[sndStr[0 : len (sndStr) - 1],
+			CNetwork.ClientAnswer,
+			CNetwork.Positive,
+			CNetwork.NoStatus]
+		)
+		ret = netObj.ReadString ()
+		if -1 == ret[0]:
+			print ("Format error of header")
+			return 1
+		if 0 != netObj.CheckLogicallyHeader ([len (ret[0])] + ret [1 : len (ret)]):
+			return 2
+		sys.stdout.write (ret[0])
+		
+		# password
+		sndStr = sys.stdin.readline ()
+		netObj.SendString (
+			[sndStr[0 : len (sndStr) - 1],
+			CNetwork.ClientAnswer,
+			CNetwork.Positive,
+			CNetwork.NoStatus]
+		)
+		ret = netObj.ReadString ()
+		if -1 == ret[0]:
+			print ("Format error of header")
+			return 1
+		if 0 != netObj.CheckLogicallyHeader ([len (ret[0])] + ret [1 : len (ret)]):
+			return 2
+		sys.stdout.write (ret[0])
+		
+		return 0
+	
+	
+	def WorkerLoop (self, netObj):
+		while True:
+			# to send a command
+			sndStr = sys.stdin.readline ()
+			if sndStr[0 : len (sndStr) - 1] == "exit":
+				netObj.SendString (
+					[sndStr[0 : len (sndStr) - 1],
+					CNetwork.ClientAnswer,
+					CNetwork.Positive,
+					CNetwork.NoStatus]
+				)
+				sys.stdout.write ("Results: {strr}".format (strr = netObj.ReadString ()[0]))
+				return
+				
+			netObj.SendString (
+				[sndStr[0 : len (sndStr) - 1],
+				CNetwork.ClientAnswer,
+				CNetwork.Positive,
+				CNetwork.NoStatus]
+			)
+			#sys.stdout.write ("Results: ")
+			ret = netObj.ReadString ()
+			if -1 == ret[0]:
+				print ("Format error of header")
+				return
+			if 0 != netObj.CheckLogicallyHeader ([len (ret [0])] + ret [1 : len (ret)]):
+				return
+			sys.stdout.write ("Results: {strr}".format (strr = ret[0]))
+		
+		return
+	
 
 
 def main ():
 	if len (sys.argv) < 3:
 		print ("Need host and port parameters")
 		return
-	
 	if __debug__:
 		print ("Connecting to: {0}, at port: {1}".format (sys.argv[1], sys.argv[2]))
 	
-	sock = socket.socket (socket.AF_INET, socket.SOCK_STREAM)
-	timeVal = struct.pack ("LL", g_waitSecs, 1000 * g_waitMilSecs)
-	sock.setsockopt (socket.SOL_SOCKET, socket.SO_RCVTIMEO, timeVal)
-	sock.setsockopt (socket.SOL_SOCKET, socket.SO_SNDTIMEO, timeVal)
-	sock.connect ((sys.argv[1], int (sys.argv[2])))
 	
-	# first string from server
-	ret = ReadString (sock)
-	sys.stdout.write (ret[4])
+	netObj = CNetwork (sys.argv[1], sys.argv[2], WAITSECS, WAITMILSECS)
+	applObj = CApplication ()
 	
-	# login name
-	sndStr = sys.stdin.readline ()
-	SendString (sock, sndStr[0 : len (sndStr) - 1])
-	ret = ReadString (sock)
-	if ret[2] == Negative and ret[3] == BadName:
-		print ("Incorrect login")
-		return 1
-	sys.stdout.write (ret[4])
-	
-	# password
-	sndStr = sys.stdin.readline ()
-	SendString (sock, sndStr[0 : len (sndStr) - 1])
-	ret = ReadString (sock)
-	if ret[2] == Negative and ret[3] == BadPass:
-		print ("Incorrect password")
-		return 2
-	sys.stdout.write (ret[4])
-	
-	while True:
-		# to send a command
-		sndStr = sys.stdin.readline ()
-		if sndStr[0:len (sndStr) - 1] == "exit":
-			SendString (sock, sndStr[0 : len (sndStr) - 1])
-			sys.stdout.write ("Results: {strr}".format (strr = ReadString (sock)[4]))
-			return
-			
-		SendString (sock, sndStr[0 : len (sndStr) - 1])
-		#sys.stdout.write ("Results: ")
-		ret = ReadString (sock)
-		if ret[1] == ServerAnswer and ret[3] & InternalServerError and (not ret[3] & WaitCommand):
-			print ("Have got an error from server, we can't continue command execution")
-			sys.stdout.write ("Results: {strr}".format (strr = ret[4]))
-			return 3
-		sys.stdout.write ("Results: {strr}".format (strr = ret[4]))
+	if 0 != applObj.AuthInfoTransfer (netObj, "", ""):
+		return
+	applObj.WorkerLoop (netObj)
 		
-	print ("===============================================================")
-	#http://pymotw.com/2/struct/
+	print ("Bye bye")
 	
 	
 	return
 	
 
-#try:
-main ()
-"""
-except Exception as Exc:
-	print ("Have caught an exception")
-	print Exc
-	exit (10001)
-"""
 
+if __name__ == "__main__":
+	main ()
+else:
+	print ("This script can't run as a module")
+	raise Exception ("Not a module")
 
 
 

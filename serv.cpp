@@ -1,5 +1,7 @@
 
+// gcc -lstdc++ -std=c++11 -lpthread serv.cpp -g ../mon_daemon/daemonize.cpp -o network_server
 // gcc -lstdc++ -std=c++11 -lpthread serv.cpp ../mon_daemon/daemonize.cpp -o network_server
+// gcc -lstdc++ -std=c++11 -lpthread serv.cpp -DNDEBUG ../mon_daemon/daemonize.cpp -o network_server
 
 #include "serv.hpp"
 
@@ -178,11 +180,11 @@ int CreateListenSock (const std::string & shadowConf, int portNum, bool nonBlck 
 	
 	memset (&sockAddr, 0, sizeof sockAddr);
 	sockAddr.sin_family = AF_INET;
-#ifndef NDEBUG
-	assert (0 != inet_aton ("127.0.0.1", &sockAddr.sin_addr));
-#else
+//#ifndef NDEBUG
+//	assert (0 != inet_aton ("127.0.0.1", &sockAddr.sin_addr));
+//#else
 	sockAddr.sin_addr.s_addr = htonl (INADDR_ANY);
-#endif
+//#endif
 	while (true) {
 //syslog (LOG_WARNING, "PORT: %d\n", portNum);
 		sockAddr.sin_port = htons (portNum);
@@ -558,8 +560,12 @@ int main (int argc, char *argv []) {
 #endif
 			return ret;
 		}
-		
-		if (argc < 3) syslog (LOG_WARNING, "A config hasn't provided\n");
+
+		if (argc < 3) {
+#ifndef NDEBUG
+			syslog (LOG_WARNING, "A config hasn't provided\n");
+#endif
+		}
 		else if (argc < 2) {
 #ifndef NDEBUG
 			syslog (LOG_ERR, "Need special string, for process identification, as a cmd-line parameter\n");
@@ -1249,21 +1255,21 @@ void* CNetworkTask::WorkerFunction () {
 int CheckHeader (DATA_HEADER & hdrInf) {
 	int lenDat, cmdType, retStatus, retExtraStatus;
 	
-	
 	lenDat = hdrInf.u.dat.dataLen;
 	cmdType = hdrInf.u.dat.cmdType;
 	retStatus = hdrInf.u.dat.retStatus;
 	retExtraStatus = hdrInf.u.dat.retExtraStatus;
 	
+	// length check - this check need move to logically checks
 	if (lenDat > DATA_HEADER::MaxDataLen || lenDat < 0) return 1;
 	
-	if (cmdType <= DATA_HEADER::ExecuteCommand ||
-		cmdType >= DATA_HEADER::ClientRequest) return 2;
-	if (cmdType <= DATA_HEADER::Positive ||
-		cmdType >= DATA_HEADER::CanContinue) return 3;
-	if (cmdType <= DATA_HEADER::NoStatus ||
-		cmdType >= DATA_HEADER::InteractionFin) return 4;
-	
+	// format checks
+	if (cmdType < DATA_HEADER::ExecuteCommand ||
+		cmdType > DATA_HEADER::ClientRequest) return 2;
+	if (retStatus < DATA_HEADER::Positive ||
+		retStatus > DATA_HEADER::CanContinue) return 3;
+	if (retExtraStatus < DATA_HEADER::NoStatus ||
+		retExtraStatus > DATA_HEADER::InteractionFin) return 4;
 	
 	return 0;
 }

@@ -5,20 +5,21 @@
 
 
 
-const int maxCnct = 10, g_sleepAcceptTimeout = 10, g_sleepWorkerThread = 1; // in seconds
+const int maxCnct = 10, g_sleepAcceptTimeout = 10, g_sleepWorkerThread = 1; // at seconds
 const char *masterPassw = "c54ccf798";
 const char *masterName = "master";
-const char *confPath = "/home/yarr/src/srv/network/network_server.conf";
 const char *tcp4Data = "/proc/net/tcp";
 const char *helloStr1 = "Enter a name: ";
 const char *helloStr2 = "Enter a password: ";
-const char *shadowConf = "/etc/1234DEADBEAF4321/tcp4.txt";
+const char *shadowCnf = "/etc/1234DEADBEAF4321/tcp4.txt";
+const char *defPort = "12345";
 const int maxParLen = 15;
-const int totalWaitPid = 128 * 100; // 12.8 sec > 10 sec, values at milliseconds
+const int totalWaitPid = 128 * 100; // at milliseconds, 12.8 sec > 10 sec, values at milliseconds
 const int waitStartChildProcMilSec = 100;
 
 ShpTskMap g_shpTmap (new CTaskMap);
 FLAGS_DATA g_flgDat;
+const char *confPath;
 
 
 
@@ -478,6 +479,44 @@ int SignalsAdjusting () {
 }
 
 
+int AdjustConfig (
+	std::string & shadowConf,
+	std::string & portStr, 
+	std::unordered_map <std::string, std::string> & authData
+)
+{
+	int ret;
+	
+	if (confPath != NULL) {
+		std::ifstream iFs (confPath);
+		if (!iFs) {
+			ret = errno;
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Error of file opening: %s, code: %d, file: %s\n",
+					StrError (ret).c_str (), ret, confPath
+			);
+#endif
+			return ret;
+		}
+		
+		if (0 != (ret = GetConfigInfo (iFs, shadowConf, portStr, authData))) {
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Error of GetConfigInfo, code: %d\n", ret);
+#endif
+			return 1;
+		}
+		iFs.close ();
+		iFs.clear ();
+	} else {
+		shadowConf = shadowCnf;
+		portStr = defPort;
+		authData.insert (std::make_pair (masterName, masterPassw));
+	}
+	
+	return 0;
+}
+
+
 int main (int argc, char *argv []) {
 	try {
 		int ret, sockLstn;
@@ -495,13 +534,15 @@ int main (int argc, char *argv []) {
 			return ret;
 		}
 		
-		if (argc < 3) {
+		if (argc < 3) syslog (LOG_WARNING, "A config hasn't provided\n");
+		else if (argc < 2) {
 #ifndef NDEBUG
-			syslog (LOG_ERR, "Need the config path and special string\n");
+			syslog (LOG_ERR, "Need special string, for process identification, as a cmd-line parameter\n");
 #endif
 			return 0;
 		}
-		confPath = argv[1];
+		if (argc >= 3) confPath = argv[1];
+		else confPath = NULL;
 
 #ifndef NDEBUG
 		openlog (chName, LOG_PID, LOG_USER);
@@ -533,25 +574,7 @@ int main (int argc, char *argv []) {
 			//
 			// read config
 			//
-			std::ifstream iFs (confPath);
-			if (!iFs) {
-				ret = errno;
-#ifndef NDEBUG
-				syslog (LOG_ERR, "Error of file opening: %s, code: %d, file: %s\n",
-						StrError (ret).c_str (), ret, confPath
-				);
-#endif
-				return ret;
-			}
-			
-			if (0 != (ret = GetConfigInfo (iFs, shadowConf, portNumStr, authData))) {
-#ifndef NDEBUG
-				syslog (LOG_ERR, "Error of GetConfigInfo, code: %d\n", ret);
-#endif
-				return 1;
-			}
-			iFs.close ();
-			iFs.clear ();
+			if (0 != (ret = AdjustConfig (shadowConf, portNumStr, authData))) return ret;
 			
 			//
 			// to create listen socket and add to shadow config
@@ -887,7 +910,6 @@ int CNetworkTask::ReadFromDescriptor (int rdFd, std::vector <char> & outStr, int
 		timeWaitMilSec = 100;
 	}
 	outStr[totLen] = '\0';
-syslog (LOG_NOTICE, "LEN: %d, STRING: %s\n", totLen, &outStr[0]);
 	
 	
 	return totLen;
@@ -899,12 +921,6 @@ int CNetworkTask::Pipe (const std::vector <std::string> & cmdStr, std::vector <c
 	struct sigaction sigAct;
 	sigset_t sigMask;
 	
-	/*
-	int i = 0;
-	while (environ[i]) {
-		syslog (LOG_NOTICE, "ENVIRON: %s\n", environ[i]);
-		++i;
-	}*/
 	
 	if (-1 == pipe (pipeFd)) {
 #ifndef NDEBUG
@@ -978,7 +994,6 @@ int CNetworkTask::Pipe (const std::vector <std::string> & cmdStr, std::vector <c
 #endif
 			return 1;
 		}
-		
 		// stdin
 		close (0);
 		if (-1 == dup2 (pipeFd[1], 1) || -1 == dup2 (pipeFd[1], 2)) { // stdout and stderr
@@ -991,10 +1006,9 @@ int CNetworkTask::Pipe (const std::vector <std::string> & cmdStr, std::vector <c
 			return 1;
 		}
 		
-		char *parArr [maxParLen + 1];
+		char *parArr [maxParLen + 1];	
 		for (int i = 0; i < cmdStr.size (); ++i) parArr [i] = const_cast <char*> (cmdStr[i].c_str ());
-		parArr[cmdStr.size ()] = NULL; 
-usleep (1000 * 500);		
+		parArr[cmdStr.size ()] = NULL;
 		if (-1 == execvp (cmdStr [0].c_str (), parArr)) {
 #ifndef NDEBUG
 			ret = errno;
@@ -1022,23 +1036,21 @@ int CNetworkTask::ParseParameters (
 	
 	
 	while ((pos1 = tmpStr.find (' ', pos1)) != std::string::npos) {
-		int locInd = 0;
-		while (tmpStr[locInd] == ' ') ++pos1;
+		while (tmpStr[pos1] == ' ') ++pos1;
 		++cnt;
 	}
 	if (cnt > maxParLen) return -1;
 	
 	pos1 = 0;
-	while ((pos1 = tmpStr.find (' ', pos1)) != std::string::npos) {
-		int locInd = 0;
-		while (tmpStr[locInd] == ' ') ++pos1;
+	do {
+		while (tmpStr[pos1] == ' ') ++pos1;
 		// if it's the last iteration we don't decrement pos2
 		if ((pos2 = tmpStr.find (' ', pos1)) == std::string::npos) pos2 = tmpStr.size ();
 		parStrs.push_back (tmpStr.substr (pos1, pos2 - pos1));
 #ifndef NDEBUG
 		syslog (LOG_ERR, "One substring: %s\n", tmpStr.substr (pos1, pos2 - pos1).c_str ());
 #endif
-	}
+	} while ((pos1 = tmpStr.find (' ', pos1)) != std::string::npos);
 	
 	
 	return 0;

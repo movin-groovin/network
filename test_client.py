@@ -259,8 +259,6 @@ else:
 	print ("This script can't run as a module")
 	raise Exception ("Not a module")
 
-#master c54ccf798
-
 
 
 

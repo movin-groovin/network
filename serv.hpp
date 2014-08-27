@@ -227,10 +227,10 @@ typedef struct _DATA_HEADER {
 	static const int MaxDataLen = 128 * 1024 * 1024;
 	enum Cmds {ExecuteCommand = 0x0, ServerAnswer = 0x1,
 			   ServerRequest = 0x2, ClientAnswer = 0x4,
-			   ClientRequest = 0x8
+			   ClientRequest = 0x8, CmdsSUMMARY = 0x0+0x1+0x2+0x4+0x8
 	};
 	enum Statuses {Positive = 0x0, Negative = 0x1,
-				   CanContinue = 0x2
+				   CanContinue = 0x2, StatusesSUMMARY = 0x0+0x1+0x2
 	};
 	enum ExtraStatuses {NoStatus = 0, BadName = 1,
 						BadPass = 2, InternalServerError = 3,
@@ -293,7 +293,8 @@ typedef std::shared_ptr <CTaskMap> ShpTskMap;
 //
 // Function prototypes
 //
-int CheckHeader (DATA_HEADER & hdrInf);
+int CheckFormatHeader (DATA_HEADER & hdrInf);
+int CheckLogicallyHeader (DATA_HEADER & hdrInf);
 
 
 

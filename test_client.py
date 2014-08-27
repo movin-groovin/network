@@ -22,10 +22,14 @@ class CNetwork (object):
 	ServerRequest = 0x2
 	ClientAnswer = 0x4
 	ClientRequest = 0x8
+	#
+	CommandsSum = 0x0+0x1+0x2+0x4+0x8
 
 	Positive = 0x0
 	Negative = 0x1
 	CanContinue = 0x2
+	#
+	StatusesSum = 0x0+0x1+0x2
 
 	NoStatus = 0
 	BadName = 1
@@ -108,11 +112,15 @@ class CNetwork (object):
 		retStatus = hdrInternalsList[2]
 		retExtraStatus = hdrInternalsList[3]
 		
-		if cmdType < CNetwork.ExecuteCommand or cmdType > CNetwork.ClientRequest:
+		#if __debug__:
+		#	print ("Values of header's fields: len: {0}, cmd: {1}, status: {2}, extra-"
+		#		   "status: {3}".format (lenData, cmdType, retStatus, retExtraStatus))
+		
+		if cmdType < CNetwork.ExecuteCommand or cmdType > CNetwork.CommandsSum:
 			print ("Not correct cmd type")
 			return 2
 		
-		if retStatus < CNetwork.Positive or retStatus > CNetwork.CanContinue:
+		if retStatus < CNetwork.Positive or retStatus > CNetwork.StatusesSum:
 			print ("Not correct ret status")
 			return 3
 		
@@ -131,12 +139,12 @@ class CNetwork (object):
 		retExtraStatus = hdrInternalsList[3]
 		
 		if lenData > CNetwork.MaxDataLen:
-			print ("Have received data too long: {bts} bytes".format (bts = lenData))
+			#print ("Have received data too long: {bts} bytes".format (bts = lenData))
 			return 1
 		
 		if (retStatus & CNetwork.Negative) and (not (retStatus & CNetwork.CanContinue)):
-			print ("Server has returned fatal error, we can't continue processing, status:"
-				   " {0}, extra-status: {1}". format (retStatus, retExtraStatus))
+			#print ("Server has returned fatal error, we can't continue processing, status:"
+			#	   " {0}, extra-status: {1}". format (retStatus, retExtraStatus))
 			return 2
 		
 		return 0
@@ -172,6 +180,7 @@ class CApplication (object):
 			print ("Format error of header")
 			return 1
 		if 0 != netObj.CheckLogicallyHeader ([len (ret[0])] + ret [1 : len (ret)]):
+			print ("Not correct name")
 			return 2
 		sys.stdout.write (ret[0])
 		
@@ -188,6 +197,7 @@ class CApplication (object):
 			print ("Format error of header")
 			return 1
 		if 0 != netObj.CheckLogicallyHeader ([len (ret[0])] + ret [1 : len (ret)]):
+			print ("Not correct password")
 			return 2
 		sys.stdout.write (ret[0])
 		
@@ -255,7 +265,7 @@ else:
 	print ("This script can't run as a module")
 	raise Exception ("Not a module")
 
-
+#master c54ccf798
 
 
 

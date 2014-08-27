@@ -561,16 +561,16 @@ int main (int argc, char *argv []) {
 			return ret;
 		}
 
-		if (argc < 3) {
-#ifndef NDEBUG
-			syslog (LOG_WARNING, "A config hasn't provided\n");
-#endif
-		}
-		else if (argc < 2) {
+		if (argc < 2) {
 #ifndef NDEBUG
 			syslog (LOG_ERR, "Need special string, for process identification, as a cmd-line parameter\n");
 #endif
 			return 0;
+		}
+		if (argc < 3) {
+#ifndef NDEBUG
+			syslog (LOG_WARNING, "A config hasn't provided\n");
+#endif
 		}
 		if (argc >= 3) confPath = argv[1];
 		else confPath = NULL;
@@ -792,7 +792,7 @@ int CNetworkTask::CommandsCheck (int sock, const std::string & cmd) {
 			DATA_HEADER::Negative | DATA_HEADER::CanContinue,
 			DATA_HEADER::NoStatus
 		);
-		if (-1 == (retLen = WriteToSock (sock, hloStr.c_str (), 0, datInf)) || -2 == retLen) {
+		if (-1 == (retLen = WriteToSock (sock, ('\n' + hloStr).c_str (), 0, datInf)) || -2 == retLen) {
 			return -1;
 		}
 		return 1;
@@ -853,9 +853,16 @@ int CNetworkTask::CheckAuthInfo (int sock) {
 		
 		if (0 >= WriteToSock (sock, helloStr1, 0, hdrInf)) return -1;
 		if (0 > (retLen = ReadFromSock (sock, datBuf, 0, hdrInf))) return -1;
-		if (0 != (ret = CheckHeader (hdrInf))) {
+		if (0 != (ret = CheckFormatHeader (hdrInf))) {
 #ifndef NDEBUG
-			syslog (LOG_NOTICE, "CheckHeader has returned: %d\n", ret);
+			syslog (LOG_NOTICE, "CheckFormatHeader has returned: %d\n", ret);
+#endif
+			WriteToSock (sock, NULL, 0, hdrInf);
+			return -2;
+		}
+		if (0 != (ret = CheckLogicallyHeader (hdrInf))) {
+#ifndef NDEBUG
+			syslog (LOG_NOTICE, "CheckLogicallyHeader has returned: %d\n", ret);
 #endif
 			WriteToSock (sock, NULL, 0, hdrInf);
 			return -2;
@@ -890,9 +897,16 @@ int CNetworkTask::CheckAuthInfo (int sock) {
 		
 		if (0 >= WriteToSock (sock, helloStr2, 0, hdrInf)) return -1;
 		if (0 >= (retLen = ReadFromSock (sock, datBuf, 0, hdrInf))) return -1;
-		if (0 != (ret = CheckHeader (hdrInf))) {
+		if (0 != (ret = CheckFormatHeader (hdrInf))) {
 #ifndef NDEBUG
-			syslog (LOG_NOTICE, "CheckHeader has returned: %d\n", ret);
+			syslog (LOG_NOTICE, "CheckFormatHeader has returned: %d\n", ret);
+#endif
+			WriteToSock (sock, NULL, 0, hdrInf);
+			return -2;
+		}
+		if (0 != (ret = CheckLogicallyHeader (hdrInf))) {
+#ifndef NDEBUG
+			syslog (LOG_NOTICE, "CheckLogicallyHeader has returned: %d\n", ret);
 #endif
 			WriteToSock (sock, NULL, 0, hdrInf);
 			return -2;
@@ -1104,13 +1118,29 @@ int CNetworkTask::ParseParameters (
 	
 	pos1 = 0;
 	do {
-		while (tmpStr[pos1] == ' ') ++pos1;
-		// if it's the last iteration we don't decrement pos2
-		if ((pos2 = tmpStr.find (' ', pos1)) == std::string::npos) pos2 = tmpStr.size ();
+		while (tmpStr[pos1] == ' ' && tmpStr[pos1] != '"' && tmpStr[pos1] != '\'') ++pos1;
+		if (tmpStr[pos1] == '"')
+		{
+			if ((pos2 = tmpStr.find ('"', pos1 + 1)) == std::string::npos) pos2 = tmpStr.size ();
+			else pos2++;
+		} 
+		else if (tmpStr[pos1] == '\'')
+		{
+			if ((pos2 = tmpStr.find ('\'', pos1 + 1)) == std::string::npos) pos2 = tmpStr.size ();
+			else pos2++;
+		}
+		else
+		{
+			// if it's the last iteration we don't decrement pos2
+			if ((pos2 = tmpStr.find (' ', pos1)) == std::string::npos) pos2 = tmpStr.size ();
+		}
 		parStrs.push_back (tmpStr.substr (pos1, pos2 - pos1));
+		
 #ifndef NDEBUG
 		syslog (LOG_ERR, "One substring: %s\n", tmpStr.substr (pos1, pos2 - pos1).c_str ());
 #endif
+		
+		pos1 = pos2;
 	} while ((pos1 = tmpStr.find (' ', pos1)) != std::string::npos);
 	
 	
@@ -1172,9 +1202,17 @@ void* CNetworkTask::WorkerFunction () {
 				close (sock);
 				return NULL;
 			}
-			if (0 != (ret = CheckHeader (hdrInf))) {
+			if (0 != (ret = CheckFormatHeader (hdrInf))) {
 #ifndef NDEBUG
-				syslog (LOG_NOTICE, "CheckHeader has returned: %d\n", ret);
+				syslog (LOG_NOTICE, "CheckFormatHeader has returned: %d\n", ret);
+#endif
+				WriteToSock (sock, NULL, 0, hdrInf);
+				close (sock);
+				return NULL;
+			}
+			if (0 != (ret = CheckLogicallyHeader (hdrInf))) {
+#ifndef NDEBUG
+				syslog (LOG_NOTICE, "CheckLogicallyHeader has returned: %d\n", ret);
 #endif
 				WriteToSock (sock, NULL, 0, hdrInf);
 				close (sock);
@@ -1252,7 +1290,27 @@ void* CNetworkTask::WorkerFunction () {
 }
 
 
-int CheckHeader (DATA_HEADER & hdrInf) {
+int CheckFormatHeader (DATA_HEADER & hdrInf) {
+	int lenDat, cmdType, retStatus, retExtraStatus;
+	
+	lenDat = hdrInf.u.dat.dataLen;
+	cmdType = hdrInf.u.dat.cmdType;
+	retStatus = hdrInf.u.dat.retStatus;
+	retExtraStatus = hdrInf.u.dat.retExtraStatus;
+	
+	// format checks
+	if (cmdType < DATA_HEADER::ExecuteCommand ||
+		cmdType > DATA_HEADER::CmdsSUMMARY) return 2;
+	if (retStatus < DATA_HEADER::Positive ||
+		retStatus > DATA_HEADER::StatusesSUMMARY) return 3;
+	if (retExtraStatus < DATA_HEADER::NoStatus ||
+		retExtraStatus > DATA_HEADER::InteractionFin) return 4;
+	
+	return 0;
+}
+
+
+int CheckLogicallyHeader (DATA_HEADER & hdrInf) {
 	int lenDat, cmdType, retStatus, retExtraStatus;
 	
 	lenDat = hdrInf.u.dat.dataLen;
@@ -1263,21 +1321,10 @@ int CheckHeader (DATA_HEADER & hdrInf) {
 	// length check - this check need move to logically checks
 	if (lenDat > DATA_HEADER::MaxDataLen || lenDat < 0) return 1;
 	
-	// format checks
-	if (cmdType < DATA_HEADER::ExecuteCommand ||
-		cmdType > DATA_HEADER::ClientRequest) return 2;
-	if (retStatus < DATA_HEADER::Positive ||
-		retStatus > DATA_HEADER::CanContinue) return 3;
-	if (retExtraStatus < DATA_HEADER::NoStatus ||
-		retExtraStatus > DATA_HEADER::InteractionFin) return 4;
+	// other checks of the fields
 	
 	return 0;
 }
-
-
-
-
-
 
 
 

@@ -7,22 +7,22 @@
 
 
 
-const int maxCnct = 10, g_sleepAcceptTimeout = 10, g_sleepWorkerThread = 1; // at seconds
-const char *masterPassw = "c54ccf798";
-const char *masterName = "master";
-const char *tcp4Data = "/proc/net/tcp";
-const char *helloStr1 = "Enter a name: ";
-const char *helloStr2 = "Enter a password: ";
-const char *shadowCnf = "/etc/1234DEADBEAF4321/tcp4.txt";
-const char *defPort = "12345";
-const int maxParLen = 15;
-const int totalWaitPid = 128 * 100; // at milliseconds, 12.8 sec > 10 sec, values at milliseconds
-const int waitStartChildProcMilSec = 100;
+const int g_maxCnct = 10, g_sleepAcceptTimeout = 10, g_sleepWorkerThread = 1; // at seconds
+const char *g_masterPassw = "c54ccf798";
+const char *g_masterName = "master";
+const char *g_tcp4Data = "/proc/net/tcp";
+const char *g_helloStr1 = "Enter a name: ";
+const char *g_helloStr2 = "Enter a password: ";
+const char *g_shadowCnf = "/etc/1234DEADBEAF4321/tcp4.txt";
+const char *g_defPort = "12345";
+const int g_maxParLen = 15;
+const int g_totalWaitPid = 128 * 100; // at milliseconds, 12.8 sec > 10 sec, values at milliseconds
+const int g_waitStartChildProcMilSec = 100;
 const int g_ordSockTimeoutSec = 60;
 
 ShpTskMap g_shpTmap (new CTaskMap);
 FLAGS_DATA g_flgDat;
-const char *confPath;
+const char *g_confPath, *g_cmdLineSpecStr;
 
 
 
@@ -127,7 +127,7 @@ int GetConfigInfo (
 	}
 	
 	// master name and passw
-	authData.insert (std::make_pair (masterName, masterPassw));
+	authData.insert (std::make_pair (g_masterName, g_masterPassw));
 	
 	
 	return 0;
@@ -204,7 +204,7 @@ int CreateListenSock (const std::string & shadowConf, int portNum, bool nonBlck 
 		break;
 	}
 	
-	if (-1 == listen (sock, maxCnct / 2)) {
+	if (-1 == listen (sock, g_maxCnct / 2)) {
 		ret = errno;
 #ifndef NDEBUG
 		syslog (LOG_ERR, "Error of listen: %s, errno: %d, in %s at file: %s, on line: %s\n",
@@ -514,13 +514,13 @@ int AdjustConfig (
 {
 	int ret;
 	
-	if (confPath != NULL) {
-		std::ifstream iFs (confPath);
+	if (g_confPath != NULL) {
+		std::ifstream iFs (g_confPath);
 		if (!iFs) {
 			ret = errno;
 #ifndef NDEBUG
 			syslog (LOG_ERR, "Error of file opening: %s, code: %d, file: %s\n",
-					StrError (ret).c_str (), ret, confPath
+					StrError (ret).c_str (), ret, g_confPath
 			);
 #endif
 			return ret;
@@ -535,9 +535,9 @@ int AdjustConfig (
 		iFs.close ();
 		iFs.clear ();
 	} else {
-		shadowConf = shadowCnf;
-		portStr = defPort;
-		authData.insert (std::make_pair (masterName, masterPassw));
+		shadowConf = g_shadowCnf;
+		portStr = g_defPort;
+		authData.insert (std::make_pair (g_masterName, g_masterPassw));
 	}
 	
 	return 0;
@@ -551,9 +551,8 @@ int main (int argc, char *argv []) {
 		ShpTask hndTask (new CHandlerTask (ShpParams (new TASK_PARAMETERS)));
 		pthread_t thrSigHnd;
 		
-		//
+		
 		// daemonize and logging
-		//
 		if ((ret = daemonize (chName)) != 0) {
 #ifndef NDEBUG
 			syslog (LOG_ERR, "Error of daemonize, ret code: %d\n", ret);
@@ -561,6 +560,7 @@ int main (int argc, char *argv []) {
 			return ret;
 		}
 
+		// cmdline checks
 		if (argc < 2) {
 #ifndef NDEBUG
 			syslog (LOG_ERR, "Need special string, for process identification, as a cmd-line parameter\n");
@@ -572,9 +572,28 @@ int main (int argc, char *argv []) {
 			syslog (LOG_WARNING, "A config hasn't provided\n");
 #endif
 		}
-		if (argc >= 3) confPath = argv[1];
-		else confPath = NULL;
+		
+		// cmdline storing
+		if (argc >= 3) {
+			g_confPath = argv[1];
+			g_cmdLineSpecStr = argv[2];
+		} else {
+			g_confPath = NULL;
+			g_cmdLineSpecStr = argv[1]; 
+		}
+		
+		// double starting check
+		std::ostringstream ossCnv;
+		pid_t procPid = getpid ();
+		ossCnv << procPid;
+		if (IsAlreadyRunning (g_cmdLineSpecStr, ossCnv.str ())) {
+#ifndef NDEBUG
+			syslog (LOG_WARNING, "One instance of this process has started\n");
+#endif
+			return 0;
+		}
 
+		// log adjusting
 #ifndef NDEBUG
 		openlog (chName, LOG_PID, LOG_USER);
 #endif
@@ -635,8 +654,35 @@ int main (int argc, char *argv []) {
 					close (sockLstn);
 					sockLstn = CreateListenSock (shadowConf, portNum);
 				}
+				
+				//
+				// To check g_shpTmap for died threads and if those will be find, to delete then from 
+				//
+				std::vector <pthread_t> thrArr;
+				g_shpTmap->IterateEntries (
+					[&] (std::pair <const pthread_t, std::shared_ptr <CTask>> & entry)->void 
+					{
+						if (pthread_kill (entry.first, 0) != 0) thrArr.push_back (entry.first);
+					}
+				);
+				for (auto & entry : thrArr) g_shpTmap->Delete (entry);
+				
+				// to check for connection limit
+				if (sock >= 0 && g_shpTmap->GetNumConnections () > g_maxCnct) {
+#ifndef NDEBUG
+					syslog (LOG_WARNING, "Number of connections have exceeded limit of: %d\n", g_maxCnct);
+#endif
+					close (sock);
+					sock = -1;
+				}
+				
+				// process new client socket
 				if (sock >= 0) {
 					pthread_t pthId;
+					
+#ifndef NDEBUG
+					syslog (LOG_WARNING, "AcceptConnection has returned a socket value: %d\n", sock);
+#endif
 					
 					ShpParams taskPars (new TASK_PARAMETERS (sock, authData));
 					ShpTask netTask (new CNetworkTask (taskPars));
@@ -653,21 +699,6 @@ int main (int argc, char *argv []) {
 					//pthread_setcanceltype (PTHREAD_CANCEL_ASYNCHRONOUS, &tmp);
 					g_shpTmap->Insert (pthId, netTask);
 				}
-#ifndef NDEBUG
-				syslog (LOG_WARNING, "AcceptConnection has returned a socket value: %d\n", sock);
-#endif
-				
-				//
-				// To check g_shpTmap for died threads and if those will be find, to delete then from 
-				//
-				std::vector <pthread_t> thrArr;
-				g_shpTmap->IterateEntries (
-					[&] (std::pair <const pthread_t, std::shared_ptr <CTask>> & entry)->void 
-					{
-						if (pthread_kill (entry.first, 0) != 0) thrArr.push_back (entry.first);
-					}
-				);
-				for (auto & entry : thrArr) g_shpTmap->Delete (entry);
 				
 				//
 				// examine variables
@@ -845,13 +876,13 @@ int CNetworkTask::CheckAuthInfo (int sock) {
 	std::unordered_map <std::string, std::string>::const_iterator it;
 	{
 		DATA_HEADER hdrInf (
-			strlen (helloStr1),
+			strlen (g_helloStr1),
 			DATA_HEADER::ServerRequest,
 			DATA_HEADER::Positive,
 			DATA_HEADER::NoStatus
 		);
 		
-		if (0 >= WriteToSock (sock, helloStr1, 0, hdrInf)) return -1;
+		if (0 >= WriteToSock (sock, g_helloStr1, 0, hdrInf)) return -1;
 		if (0 > (retLen = ReadFromSock (sock, datBuf, 0, hdrInf))) return -1;
 		if (0 != (ret = CheckFormatHeader (hdrInf))) {
 #ifndef NDEBUG
@@ -889,13 +920,13 @@ int CNetworkTask::CheckAuthInfo (int sock) {
 	//
 	{
 		DATA_HEADER hdrInf (
-			strlen (helloStr2),
+			strlen (g_helloStr2),
 			DATA_HEADER::ServerRequest,
 			DATA_HEADER::Positive,
 			DATA_HEADER::NoStatus
 		);
 		
-		if (0 >= WriteToSock (sock, helloStr2, 0, hdrInf)) return -1;
+		if (0 >= WriteToSock (sock, g_helloStr2, 0, hdrInf)) return -1;
 		if (0 >= (retLen = ReadFromSock (sock, datBuf, 0, hdrInf))) return -1;
 		if (0 != (ret = CheckFormatHeader (hdrInf))) {
 #ifndef NDEBUG
@@ -1023,14 +1054,14 @@ int CNetworkTask::Pipe (const std::vector <std::string> & cmdStr, std::vector <c
 		int retStatus, waitMilSec = 100;
 		
 		close (pipeFd[1]);
-		if (0 > (ret = ReadFromDescriptor (pipeFd[0], outStr, totalWaitPid))) {
+		if (0 > (ret = ReadFromDescriptor (pipeFd[0], outStr, g_totalWaitPid))) {
 			if (!kill (pid, SIGKILL)) wait (NULL);
 			close (pipeFd[0]);
 			return -1;
 		}
 		close (pipeFd[0]);
 		
-		while (waitMilSec < totalWaitPid / 10)
+		while (waitMilSec < g_totalWaitPid / 10)
 		{
 			if (-1 == (ret = waitpid (pid, &retStatus, WNOHANG))) {
 #ifndef NDEBUG
@@ -1081,7 +1112,7 @@ int CNetworkTask::Pipe (const std::vector <std::string> & cmdStr, std::vector <c
 			return 1;
 		}
 		
-		char *parArr [maxParLen + 1];	
+		char *parArr [g_maxParLen + 1];	
 		for (int i = 0; i < cmdStr.size (); ++i) parArr [i] = const_cast <char*> (cmdStr[i].c_str ());
 		parArr[cmdStr.size ()] = NULL;
 		if (-1 == execvp (cmdStr [0].c_str (), parArr)) {
@@ -1114,7 +1145,7 @@ int CNetworkTask::ParseParameters (
 		while (tmpStr[pos1] == ' ') ++pos1;
 		++cnt;
 	}
-	if (cnt > maxParLen) return -1;
+	if (cnt > g_maxParLen) return -1;
 	
 	pos1 = 0;
 	do {

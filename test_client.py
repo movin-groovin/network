@@ -38,13 +38,11 @@ class CNetwork (object):
 	TooLong = 4
 	InteractionFin = 5
 	
-	
 	def __init__ (self, hostStr, portStr, waitSec, waitMilSec):
 		if 1 != 1:
 			print ("Hello Crotchy !")
 		
 		self.sock = socket.socket (socket.AF_INET, socket.SOCK_STREAM)
-		# for pack method we must transfer "LL", not "ii" - it's an undocumented feature at py-docs
 		timeVal = struct.pack ("LL", waitSec, 1000 * waitMilSec)
 		self.sock.setsockopt (socket.SOL_SOCKET, socket.SO_RCVTIMEO, timeVal)
 		self.sock.setsockopt (socket.SOL_SOCKET, socket.SO_SNDTIMEO, timeVal)
@@ -76,14 +74,15 @@ class CNetwork (object):
 	
 	
 	def ReadString (self):
-		data = ""
+		dataLst = []
 		totLen = 0
 		
 		while True:
 			ret = self.sock.recv (CNetwork.headerSize - totLen)
 			totLen += len (ret)
-			data += ret
+			dataLst.append (ret)
 			if totLen == CNetwork.headerSize: break
+		data = "".join (dataLst)
 		#print binascii.hexlify (data)
 		
 		totLen = struct.unpack ("i", data[0:4])[0]
@@ -96,21 +95,19 @@ class CNetwork (object):
 			print ("Not correct header, ret of CheckHeader: {par}".format (par = ret))
 			return -1, cmdType, retStatus, retExtraStatus
 		
-		data = ""
+		dataLst = []
 		while totLen > 0:
 			ret = self.sock.recv (totLen)
 			totLen -= len (ret)
-			data += ret
+			dataLst.append (ret)
+		data = "".join (dataLst)
 			
 		return [data, cmdType, retStatus, retExtraStatus]
 	
 	
 	def CheckFormatHeader (self, hdrInternalsList):
 		# len, cmdType, status, extraStatus
-		lenData = hdrInternalsList[0]
-		cmdType = hdrInternalsList[1]
-		retStatus = hdrInternalsList[2]
-		retExtraStatus = hdrInternalsList[3]
+		lenData, cmdType, retStatus, retExtraStatus = hdrInternalsList
 		
 		#if __debug__:
 		#	print ("Values of header's fields: len: {0}, cmd: {1}, status: {2}, extra-"
@@ -133,10 +130,7 @@ class CNetwork (object):
 	
 	def CheckLogicallyHeader (self, hdrInternalsList):
 		# len, cmdType, status, extraStatus
-		lenData = hdrInternalsList[0]
-		cmdType = hdrInternalsList[1]
-		retStatus = hdrInternalsList[2]
-		retExtraStatus = hdrInternalsList[3]
+		lenData, cmdType, retStatus, retExtraStatus = hdrInternalsList
 		
 		if lenData > CNetwork.MaxDataLen:
 			#print ("Have received data too long: {bts} bytes".format (bts = lenData))

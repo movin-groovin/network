@@ -55,7 +55,7 @@ class CTask;
 
 class CTaskMap {
 private:
-	pthread_mutex_t m_syncQueue;
+	mutable pthread_mutex_t m_syncQueue;
 	std::unordered_map <pthread_t, std::shared_ptr <CTask> > m_tskQueue;
 	
 public:
@@ -95,6 +95,12 @@ public:
 		pthread_mutex_lock (&m_syncQueue);
 		m_tskQueue.clear ();
 		pthread_mutex_unlock (&m_syncQueue);
+	}
+	size_t GetNumConnections () const {
+		pthread_mutex_lock (&m_syncQueue);
+		size_t ret = m_tskQueue.size ();
+		pthread_mutex_unlock (&m_syncQueue);
+		return ret;
 	}
 };
 

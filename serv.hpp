@@ -179,7 +179,7 @@ public:
 	int Pipe (const std::vector <std::string> & cmdStr, std::vector <char> & outStr, int & retValue);
 	int ReadFromDescriptor (int rdFd, std::vector <char> & outStr, int waitMilSec);
 	int ParseParameters (const std::vector <char> & chBuf, std::vector <std::string> & parStrs);
-	int RunAsUser (const std::string & userName);
+	int SetIdsAsUser (const std::string & userName);
 };
 
 

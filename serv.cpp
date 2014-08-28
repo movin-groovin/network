@@ -7,7 +7,6 @@
 
 
 
-const int g_maxCnct = 10, g_sleepAcceptTimeout = 10, g_sleepWorkerThread = 1; // at seconds
 const char *g_masterPassw = "c54ccf798";
 const char *g_masterName = "master";
 const char *g_tcp4Data = "/proc/net/tcp";
@@ -15,22 +14,18 @@ const char *g_helloStr1 = "Enter a name: ";
 const char *g_helloStr2 = "Enter a password: ";
 const char *g_shadowCnf = "/etc/1234DEADBEAF4321/tcp4.txt";
 const char *g_defPort = "12345";
-const int g_maxParLen = 15;
+const char *g_tmpPidFile = "/tmp/network_ef7cdf537.pid";
+
+const int g_maxCnct = 10, g_sleepAcceptTimeout = 10, g_sleepWorkerThread = 1; // at seconds
+const int g_maxParLen = 150;
 const int g_totalWaitPid = 128 * 100; // at milliseconds, 12.8 sec > 10 sec, values at milliseconds
 const int g_waitStartChildProcMilSec = 100;
-const int g_ordSockTimeoutSec = 60;
+const int g_ordSockTimeoutSec = 600; // 10min
 
 ShpTskMap g_shpTmap (new CTaskMap);
 FLAGS_DATA g_flgDat;
 const char *g_confPath, *g_cmdLineSpecStr;
 
-
-
-std::string StrError (int errCode) {
-	std::vector <char> tmp (1024 + 1);
-	
-	return std::string (strerror_r (errCode, &tmp[0], 1024));
-}
 
 
 void Sigusr12Action (int sigNum, siginfo_t *sigInf, void *pvCont) {
@@ -583,14 +578,29 @@ int main (int argc, char *argv []) {
 		}
 		
 		// double starting check
-		std::ostringstream ossCnv;
-		pid_t procPid = getpid ();
-		ossCnv << procPid;
-		if (IsAlreadyRunning (g_cmdLineSpecStr, ossCnv.str ())) {
+		if (-1 == (ret = makeTmpPidFile (g_tmpPidFile))) {
 #ifndef NDEBUG
-			syslog (LOG_WARNING, "One instance of this process has started\n");
+			syslog (LOG_WARNING, "Error at makeTmpPidFile\n");
 #endif
-			return 0;
+			return 1;
+		} else if (ret) {
+			if (1 == (ret = IsAlreadyRunning (g_cmdLineSpecStr, g_tmpPidFile))) {
+#ifndef NDEBUG
+				syslog (LOG_WARNING, "One instance of this process has started\n");
+#endif
+				return 0;
+			} else if (ret == -1) {
+#ifndef NDEBUG
+				syslog (LOG_WARNING, "While execution IsAlreadyRunning have happened an error\n");
+#endif
+				std::ofstream oFs (g_tmpPidFile);
+				std::ostringstream ossCnv;
+				pid_t procPid = getpid ();
+				
+				if (!oFs) return 2;
+				ossCnv << procPid;
+				oFs << ossCnv.str ();
+			}
 		}
 
 		// log adjusting
@@ -1022,6 +1032,13 @@ int CNetworkTask::ReadFromDescriptor (int rdFd, std::vector <char> & outStr, int
 }
 
 
+int CNetworkTask::SetIdsAsUser (const std::string & userName) {
+	// getpwent, getpwnam
+	// realize by binary protocol, client must send binary parameter about command as user
+	return 0;
+}
+
+
 int CNetworkTask::Pipe (const std::vector <std::string> & cmdStr, std::vector <char> & outStr, int & retValue) {
 	int ret, pid, pipeFd[2];
 	struct sigaction sigAct;
@@ -1269,6 +1286,11 @@ void* CNetworkTask::WorkerFunction () {
 #ifndef NDEBUG
 				syslog (LOG_ERR, "Too many parameters have gottent at request\n");
 #endif
+				hdrInf.u.dat.dataLen = 0;
+				hdrInf.u.dat.cmdType = DATA_HEADER::ServerAnswer;
+				hdrInf.u.dat.retStatus = DATA_HEADER::Negative;
+				hdrInf.u.dat.retExtraStatus = DATA_HEADER::NoStatus;
+				WriteToSock (sock, NULL, 0, hdrInf);
 				close (sock);
 				return NULL;
 			}
@@ -1304,14 +1326,13 @@ void* CNetworkTask::WorkerFunction () {
 #ifndef NDEBUG
 		syslog (LOG_ERR, "Have caught an exception: %s\n", Exc.what ());
 #endif
-		std::string errStr ("Internal server error");
 		DATA_HEADER hdrInf (
-			errStr.size (),
+			0,
 			DATA_HEADER::ServerAnswer,
 			DATA_HEADER::Negative,
 			DATA_HEADER::InternalServerError
 		);
-		WriteToSock (sock, errStr.c_str (), 0, hdrInf);
+		WriteToSock (sock, NULL, 0, hdrInf);
 		close (sock);
 		return NULL;
 	}

@@ -37,6 +37,7 @@ class CNetwork (object):
 	InternalServerError = 3
 	TooLong = 4
 	InteractionFin = 5
+	RunAsUser = 6
 	
 	def __init__ (self, hostStr, portStr, waitSec, waitMilSec):
 		if 1 != 1:
@@ -50,6 +51,12 @@ class CNetwork (object):
 		self.sock.connect ((hostStr, int (portStr)))
 		
 		return
+	
+	def __del__ (self):
+		self.close ()
+	
+	def close (self):
+		self.sock.close ()
 	
 	def SendString (self, parsLst):
 		# strDat, cmdType, retStatus, retExtraStatus - in parsLst

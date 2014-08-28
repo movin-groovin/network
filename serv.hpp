@@ -17,6 +17,7 @@
 #include <pthread.h>
 #include <poll.h>
 #include <sys/wait.h>
+#include <pwd.h>
 
 
 
@@ -176,7 +177,12 @@ public:
 	int CommandsCheck (int sock, const std::string & cmd);
 	int AdjustSignals ();
 	int CheckAuthInfo (int sock);
-	int Pipe (const std::vector <std::string> & cmdStr, std::vector <char> & outStr, int & retValue);
+	int Pipe (
+		const std::vector <std::string> & cmdStr,
+		std::vector <char> & outStr,
+		int & retValue,
+		const std::string & userName = ""
+	);
 	int ReadFromDescriptor (int rdFd, std::vector <char> & outStr, int waitMilSec);
 	int ParseParameters (const std::vector <char> & chBuf, std::vector <std::string> & parStrs);
 	int SetIdsAsUser (const std::string & userName);
@@ -239,7 +245,8 @@ typedef struct _DATA_HEADER {
 	};
 	enum ExtraStatuses {NoStatus = 0, BadName = 1,
 						BadPass = 2, InternalServerError = 3,
-						TooLong = 4, InteractionFin = 5
+						TooLong = 4, InteractionFin = 5,
+						RunAsUser = 6
 	};
 	
 	union {

@@ -1034,12 +1034,33 @@ int CNetworkTask::ReadFromDescriptor (int rdFd, std::vector <char> & outStr, int
 
 int CNetworkTask::SetIdsAsUser (const std::string & userName) {
 	// getpwent, getpwnam
-	// realize by binary protocol, client must send binary parameter about command as user
+	struct passwd pwdDat, *resDat;
+	std::vector <char> chArr (4096 + 1);
+	
+	getpwnam_r (userName.c_str (), &pwdDat, &chArr[0], chArr.size () - 1, &resDat);
+	if (resDat == NULL) return 1;
+	
+	if (-1 == setresuid (pwdDat.pw_uid, pwdDat.pw_uid, pwdDat.pw_uid)) {
+#ifndef NDEBUG
+		ret = errno;
+		syslog (LOG_ERR, "Error of setresuid: %s, code: %d, at file: %s, at "
+		"line: %d\n", StrError (ret).c_str (), ret, __FILE__, __LINE__
+		);
+#endif
+		return 2;
+	}
+	
 	return 0;
 }
 
 
-int CNetworkTask::Pipe (const std::vector <std::string> & cmdStr, std::vector <char> & outStr, int & retValue) {
+int CNetworkTask::Pipe (
+	const std::vector <std::string> & cmdStr,
+	std::vector <char> & outStr,
+	int & retValue,
+	const std::string & userName
+)
+{
 	int ret, pid, pipeFd[2];
 	struct sigaction sigAct;
 	sigset_t sigMask;
@@ -1127,6 +1148,14 @@ int CNetworkTask::Pipe (const std::vector <std::string> & cmdStr, std::vector <c
 			);
 #endif
 			return 1;
+		}
+		
+		//
+		// To check fo other user execution
+		//
+		if (userName != "") {
+			if (SetIdsAsUser (userName))
+			
 		}
 		
 		char *parArr [g_maxParLen + 1];	

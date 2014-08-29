@@ -1036,6 +1036,7 @@ int CNetworkTask::SetIdsAsUser (const std::string & userName) {
 	// getpwent, getpwnam
 	struct passwd pwdDat, *resDat;
 	std::vector <char> chArr (4096 + 1);
+	int ret;
 	
 	getpwnam_r (userName.c_str (), &pwdDat, &chArr[0], chArr.size () - 1, &resDat);
 	if (resDat == NULL) return 1;
@@ -1402,7 +1403,7 @@ int CheckFormatHeader (DATA_HEADER & hdrInf) {
 	if (retStatus < DATA_HEADER::Positive ||
 		retStatus > DATA_HEADER::StatusesSUMMARY) return 3;
 	if (retExtraStatus < DATA_HEADER::NoStatus ||
-		retExtraStatus > DATA_HEADER::InteractionFin) return 4;
+		retExtraStatus > DATA_HEADER::RunAsUser) return 4;
 	
 	return 0;
 }

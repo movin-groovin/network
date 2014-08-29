@@ -2,7 +2,7 @@
 #-*- encoding: utf-8 -*-
 
 
-import sys, os, socket, struct, binascii
+import sys, os, socket, struct, binascii, re
 
 
 
@@ -128,7 +128,7 @@ class CNetwork (object):
 			print ("Not correct ret status")
 			return 3
 		
-		if retExtraStatus < CNetwork.NoStatus or retExtraStatus > CNetwork.InteractionFin:
+		if retExtraStatus < CNetwork.NoStatus or retExtraStatus > CNetwork.RunAsUser:
 			print ("Not correct ret extra status")
 			return 4
 		
@@ -220,14 +220,13 @@ class CApplication (object):
 				)
 				sys.stdout.write ("Results: {strr}".format (strr = netObj.ReadString ()[0]))
 				return
-			else if sndStr[0 : len ("asuser:")] == "asuser:":
-				colonInd = "".find (sndStr, ':') + 1
-				spaceInd = "".find (sndStr, ' ')
-				
-				# Здесь нужно использовать регулярные выражения !
-				
+			
+			elif sndStr[0 : len ("asuser:")] == "asuser:":
+				print (sndStr)
+				reObj = re.compile ("(?<=asuser:)\w+(?=[ ]{1,})")
+				print ("Result: {0}".format (sndStr[len ("asuser:") : len (sndStr) - 1] + " " + reObj.search (sndStr).group ()))
 				netObj.SendString (
-					[sndStr[len ("asuser:") : len (sndStr) - 1] + sndStr[colonInd : spaceInd],
+					[sndStr[len (re.search ("asuser:[^ ]+[ ]+", sndStr).group ()) : len (sndStr) - 1] + " " + reObj.search (sndStr).group (),
 					CNetwork.ClientAnswer | CNetwork.ClientRequest,
 					CNetwork.Positive,
 					CNetwork.RunAsUser]

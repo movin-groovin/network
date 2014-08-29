@@ -7,7 +7,6 @@
 #include <memory>
 #include <unordered_map>
 #include <exception>
-#include <vector>
 
 #include <cassert>
 
@@ -266,7 +265,9 @@ typedef struct _DATA_HEADER {
 			int cmdType;
 			int retStatus; // 1 - positive, 2 - negative
 			int retExtraStatus; // extra information about request or returned reply
+			
 			// other info
+			char chName [64 - 4 * 4]; // 47 + 1 - null terminated string
 		} dat;
 	} u;
 	

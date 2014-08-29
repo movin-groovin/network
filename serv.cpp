@@ -1138,6 +1138,7 @@ int CNetworkTask::Pipe (
 #endif
 			return 1;
 		}
+		
 		// stdin
 		close (0);
 		if (-1 == dup2 (pipeFd[1], 1) || -1 == dup2 (pipeFd[1], 2)) { // stdout and stderr
@@ -1150,12 +1151,9 @@ int CNetworkTask::Pipe (
 			return 1;
 		}
 		
-		//
-		// To check fo other user execution
-		//
+		// To check for execution by of name other user
 		if (userName != "") {
-			if (SetIdsAsUser (userName))
-			
+			if (SetIdsAsUser (userName)) return -1;
 		}
 		
 		char *parArr [g_maxParLen + 1];	
@@ -1179,7 +1177,9 @@ int CNetworkTask::Pipe (
 
 int CNetworkTask::ParseParameters (
 	const std::vector <char> & chBuf,
-	std::vector <std::string> & parStrs
+	std::vector <std::string> & parStrs,
+	bool asUser, // if as user, so last substring is a username
+	std::string & userName
 )
 {
 	std::string tmpStr (&chBuf[0]);
@@ -1192,6 +1192,17 @@ int CNetworkTask::ParseParameters (
 		++cnt;
 	}
 	if (cnt > g_maxParLen) return -1;
+	
+	if (asUser) {
+		if (std::string::npos == (pos1 = tmpStr.find_last_of (' '))) {
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Can't find username at parameters, file: %s, line: %d\n", __FILE__, __LINE__);
+#endif
+		} else {
+			while (tmpStr[pos1] == ' ') ++pos1;
+			parStrs.push_back (tmpStr.substr (pos1, tmpStr.length () - pos1));
+		}
+	} else userName = "";
 	
 	pos1 = 0;
 	do {
@@ -1274,6 +1285,7 @@ void* CNetworkTask::WorkerFunction () {
 			hdrInf.ZeroStruct ();
 			std::vector <std::string> parStrs;
 			std::string strErr ("While executing a command have happened an error, command: ");
+			std::string userName ("");
 			
 			if (0 > (retLen = ReadFromSock (sock, chBuf, 0, hdrInf))) {
 				close (sock);
@@ -1311,7 +1323,12 @@ void* CNetworkTask::WorkerFunction () {
 			}
 			
 			strErr += &chBuf[0];
-			if (-1 == ParseParameters (chBuf, parStrs)) {
+			if (-1 == ParseParameters (
+				chBuf,
+				parStrs,
+				hdrInf.u.dat.retExtraStatus == DATA_HEADER::RunAsUser,
+				userName)
+			) {
 #ifndef NDEBUG
 				syslog (LOG_ERR, "Too many parameters have gottent at request\n");
 #endif
@@ -1324,7 +1341,7 @@ void* CNetworkTask::WorkerFunction () {
 				return NULL;
 			}
 			
-			if ((ret = Pipe (parStrs, chBuf, retStatus)) == -1) {
+			if ((ret = Pipe (parStrs, chBuf, retStatus, userName)) == -1) {
 				strcpy (&chBuf[0], "Internal server error\n");
 				hdrInf.u.dat.cmdType = DATA_HEADER::ServerAnswer | DATA_HEADER::ServerRequest;
 				hdrInf.u.dat.retStatus = DATA_HEADER::Negative | DATA_HEADER::CanContinue;

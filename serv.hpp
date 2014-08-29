@@ -184,7 +184,12 @@ public:
 		const std::string & userName = ""
 	);
 	int ReadFromDescriptor (int rdFd, std::vector <char> & outStr, int waitMilSec);
-	int ParseParameters (const std::vector <char> & chBuf, std::vector <std::string> & parStrs);
+	int ParseParameters (
+		const std::vector <char> & chBuf,
+		std::vector <std::string> & parStrs,
+		bool asUser,
+		std::string & userName
+	);
 	int SetIdsAsUser (const std::string & userName);
 };
 

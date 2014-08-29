@@ -206,6 +206,8 @@ class CApplication (object):
 	
 	
 	def WorkerLoop (self, netObj):
+		valCmd = 0; valStatus = 0; valExtrStatus = 0
+		
 		while True:
 			# to send a command
 			sndStr = sys.stdin.readline ()
@@ -218,13 +220,26 @@ class CApplication (object):
 				)
 				sys.stdout.write ("Results: {strr}".format (strr = netObj.ReadString ()[0]))
 				return
+			else if sndStr[0 : len ("asuser:")] == "asuser:":
+				colonInd = "".find (sndStr, ':') + 1
+				spaceInd = "".find (sndStr, ' ')
 				
-			netObj.SendString (
-				[sndStr[0 : len (sndStr) - 1],
-				CNetwork.ClientAnswer,
-				CNetwork.Positive,
-				CNetwork.NoStatus]
-			)
+				# Здесь нужно использовать регулярные выражения !
+				
+				netObj.SendString (
+					[sndStr[len ("asuser:") : len (sndStr) - 1] + sndStr[colonInd : spaceInd],
+					CNetwork.ClientAnswer | CNetwork.ClientRequest,
+					CNetwork.Positive,
+					CNetwork.RunAsUser]
+				)
+			else:
+				netObj.SendString (
+					[sndStr[0 : len (sndStr) - 1],
+					CNetwork.ClientAnswer | CNetwork.ClientRequest,
+					CNetwork.Positive,
+					CNetwork.NoStatus]
+				)
+			
 			#sys.stdout.write ("Results: ")
 			ret = netObj.ReadString ()
 			if -1 == ret[0]:

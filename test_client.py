@@ -58,13 +58,15 @@ class CNetwork (object):
 	def close (self):
 		self.sock.close ()
 	
-	def SendString (self, parsLst):
+	def SendString (self, parsLst, userName = ""):
 		# strDat, cmdType, retStatus, retExtraStatus - in parsLst
 		
 		data = struct.pack ("i", len (parsLst[0]))
 		data += struct.pack ("i", parsLst[1])
 		data += struct.pack ("i", parsLst[2])
 		data += struct.pack ("i", parsLst[3])
+		if len (userName) > 0:
+			data += userName
 		data += struct.pack ("B", 0) * (CNetwork.headerSize - len (data))
 		data += parsLst[0]
 		#print binascii.hexlify (data)
@@ -222,14 +224,16 @@ class CApplication (object):
 				return
 			
 			elif sndStr[0 : len ("asuser:")] == "asuser:":
-				print (sndStr)
-				reObj = re.compile ("(?<=asuser:)\w+(?=[ ]{1,})")
-				print ("Result: {0}".format (sndStr[len ("asuser:") : len (sndStr) - 1] + " " + reObj.search (sndStr).group ()))
+				userName = re.search ("(?<=asuser:)\w+(?=[ ]{1,})", sndStr).group ()
+				prefStr = re.search ("asuser:[^ ]+[ ]+", sndStr).group ()
+				#print ("Name: {0}; Prefix: {1}{2}".format (userName, prefStr, "|"))
+				
 				netObj.SendString (
-					[sndStr[len (re.search ("asuser:[^ ]+[ ]+", sndStr).group ()) : len (sndStr) - 1] + " " + reObj.search (sndStr).group (),
+					[sndStr[len (prefStr) : len (sndStr) - 1],
 					CNetwork.ClientAnswer | CNetwork.ClientRequest,
 					CNetwork.Positive,
-					CNetwork.RunAsUser]
+					CNetwork.RunAsUser],
+					userName
 				)
 			else:
 				netObj.SendString (
@@ -267,7 +271,7 @@ def main ():
 		return
 	applObj.WorkerLoop (netObj)
 		
-	print ("Bye bye")
+	print ("===========================================================================")
 	
 	
 	return

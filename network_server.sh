@@ -5,7 +5,7 @@ CONF_NAME="network_server.conf"
 SHADOW_PART="term_advance_daemon"
 PATH=/bin/$SHADOW_PART:/bin:/usr/bin:/usr/local/bin:/sbin:/usr/sbin
 if [ "$1" != "D" ]; then
-	BINARY=/bin/$SHADOW_PART/network_server
+	BINARY=/home/rainbow/src/network/sleeper.py
 	CONFIG=/etc/$SHADOW_PART/$CONF_NAME
 	SHADOW_STRING="--term_advance_daemon"
 else
@@ -31,7 +31,6 @@ function stop {
 			
 			kill -s 0 $pid >& "/dev/null"
 			[ $? -eq 0 ] && kill -s SIGKILL $pid
-			echo "The process has stoped"
 			return 0
 		fi
 		# not that string
@@ -50,15 +49,18 @@ function main {
 	case "$1" in
 		"start")
 			$BINARY $CONFIG $SHADOW_STRING
+			echo "The process has started"
 			;;
 		
 		"stop")
 			stop
+			echo "The process has stoped"
 			;;
 			
 		"restart")
 			stop
 			$BINARY $CONFIG $SHADOW_STRING
+			echo "The process has restarted"
 			;;
 	esac
 }
@@ -67,7 +69,11 @@ function main {
 ifs_old=$IFS
 IFS=$'\n'
 [ -n "$1" ] || (echo "Enter a command: {start, stop, restart}"; exit 0)
-main $2
+if [ "$1" != "D" ]; then
+	main $1
+else
+	main $2
+fi
 IFS=$ifs_old
 
 

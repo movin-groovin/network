@@ -7,10 +7,19 @@ import sys, os, time
 
 
 def main ():
+	pid = os.fork ()
 	
-	while True:
-		print "======================= Inside infinite loop ======================="
-		time.sleep (3)
+	if pid == -1:
+		print "Error at creation of child"
+		return 0
+	
+	if pid > 0:
+		print "The child has created"
+		return 0
+	else:
+		while True:
+			print "======================= Inside infinite loop ======================="
+			time.sleep (3)
 	
 	return 0
 	

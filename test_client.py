@@ -15,6 +15,7 @@ class CNetwork (object):
 	"""The class for network operations. (thanks cap !)"""
 	headerSize = 256
 	MaxDataLen = 128 * 1024 * 1024
+	MaxLenName = 47
 	intLen = 4
 
 	ExecuteCommand = 0x0
@@ -45,8 +46,8 @@ class CNetwork (object):
 		
 		self.sock = socket.socket (socket.AF_INET, socket.SOCK_STREAM)
 		timeVal = struct.pack ("LL", waitSec, 1000 * waitMilSec)
-		self.sock.setsockopt (socket.SOL_SOCKET, socket.SO_RCVTIMEO, timeVal)
-		self.sock.setsockopt (socket.SOL_SOCKET, socket.SO_SNDTIMEO, timeVal)
+		#self.sock.setsockopt (socket.SOL_SOCKET, socket.SO_RCVTIMEO, timeVal)
+		#self.sock.setsockopt (socket.SOL_SOCKET, socket.SO_SNDTIMEO, timeVal)
 		# connect method accepts a tuple, not 2 parameters
 		self.sock.connect ((hostStr, int (portStr)))
 		
@@ -213,6 +214,7 @@ class CApplication (object):
 		while True:
 			# to send a command
 			sndStr = sys.stdin.readline ()
+			
 			if sndStr[0 : len (sndStr) - 1] == "exit":
 				netObj.SendString (
 					[sndStr[0 : len (sndStr) - 1],
@@ -222,17 +224,24 @@ class CApplication (object):
 				)
 				sys.stdout.write ("Results: {strr}".format (strr = netObj.ReadString ()[0]))
 				return
-			
 			elif sndStr[0 : len ("asuser:")] == "asuser:":
 				userName = re.search ("(?<=asuser:)\w+(?=[ ]{1,})", sndStr).group ()
 				prefStr = re.search ("asuser:[^ ]+[ ]+", sndStr).group ()
 				#print ("Name: {0}; Prefix: {1}{2}".format (userName, prefStr, "|"))
 				
+				if len (userName) > CNetwork.MaxLenName:
+					print ("Too long name of the user: {name}".format (name = userName))
+					sndStr = ""
+				else:
+					sndStr = sndStr[len (prefStr) : len (sndStr) - 1]
+				
 				netObj.SendString (
-					[sndStr[len (prefStr) : len (sndStr) - 1],
-					CNetwork.ClientAnswer | CNetwork.ClientRequest,
-					CNetwork.Positive,
-					CNetwork.RunAsUser],
+					[
+						sndStr,
+						CNetwork.ClientAnswer | CNetwork.ClientRequest,
+						CNetwork.Positive,
+						CNetwork.RunAsUser
+					],
 					userName
 				)
 			else:

@@ -18,7 +18,7 @@ const char *g_tmpPidFile = "/tmp/network_ef7cdf537.pid";
 
 const int g_maxCnct = 10, g_sleepAcceptTimeout = 10, g_sleepWorkerThread = 1; // at seconds
 const int g_maxParLen = 150;
-const int g_totalWaitPid = 128 * 100; // at milliseconds, 12.8 sec > 10 sec, values at milliseconds
+const int g_totalWaitPidMilSec = 12800; // at milliseconds, 12.8 sec > 10 sec, values at milliseconds
 const int g_waitStartChildProcMilSec = 100;
 const int g_ordSockTimeoutSec = 600; // 10min
 
@@ -388,7 +388,7 @@ int AcceptConnection (
 	}
 	if (ret == 0) {
 #ifndef NDEBUG
-		syslog (LOG_WARNING, "Have elapsed time at call of poll\n");
+		//syslog (LOG_WARNING, "Have elapsed time at call of poll\n");
 #endif
 		return -2;
 	}
@@ -893,7 +893,7 @@ int CNetworkTask::CheckAuthInfo (int sock) {
 		);
 		
 		if (0 >= WriteToSock (sock, g_helloStr1, 0, hdrInf)) return -1;
-		if (0 > (retLen = ReadFromSock (sock, datBuf, 0, hdrInf))) return -1;
+		if (0 >= (retLen = ReadFromSock (sock, datBuf, 0, hdrInf))) return -1;
 		if (0 != (ret = CheckFormatHeader (hdrInf))) {
 #ifndef NDEBUG
 			syslog (LOG_NOTICE, "CheckFormatHeader has returned: %d\n", ret);
@@ -997,20 +997,21 @@ int CNetworkTask::ReadFromDescriptor (int rdFd, std::vector <char> & outStr, int
 				StrError (ret).c_str (), ret, __FILE__, __LINE__
 		);
 #endif
-		return -1;
+		return -2;
 	}
 	
 	//
 	// Reading operation
 	//
 	while ((curLen = read (rdFd, &outStr[0] + totLen, outStr.size () - 1 - totLen)) != 0) {
-		if (curLen == -1 && errno == EAGAIN) { // wait
+		if (curLen == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) { // wait
+syslog (LOG_ERR, "Timeout reading, time: %d\n", timeWaitMilSec);
 			usleep (1000 * timeWaitMilSec);
 			timeWaitMilSec *= 2;
-			if (timeWaitMilSec > waitMilSec) return -1;
+			if (timeWaitMilSec >= waitMilSec) return -3;
 			continue;
 		}
-		if (curLen == -1 && errno == EINTR) return -2; // SIGUSR2 interrupts us
+		if (curLen == -1 && errno == EINTR) return -4; // SIGUSR2 interrupts us
 		if (curLen == -1) {
 #ifndef NDEBUG
 			ret = errno;
@@ -1018,7 +1019,7 @@ int CNetworkTask::ReadFromDescriptor (int rdFd, std::vector <char> & outStr, int
 					StrError (ret).c_str (), ret, __FILE__, __LINE__
 			);
 #endif
-			return -1;
+			return -5;
 		}
 		
 		totLen += curLen;
@@ -1026,7 +1027,7 @@ int CNetworkTask::ReadFromDescriptor (int rdFd, std::vector <char> & outStr, int
 		timeWaitMilSec = 100;
 	}
 	outStr[totLen] = '\0';
-	
+syslog (LOG_ERR, "Have read: %s\n", &outStr[0]);
 	
 	return totLen;
 }
@@ -1087,20 +1088,24 @@ int CNetworkTask::Pipe (
 #endif
 		close (pipeFd[0]);
 		close (pipeFd[1]);
-		return -1;
+		return -2;
 	} else if (pid > 0) // parent
 	{
 		int retStatus, waitMilSec = 100;
 		
 		close (pipeFd[1]);
-		if (0 > (ret = ReadFromDescriptor (pipeFd[0], outStr, g_totalWaitPid))) {
+		if (0 > (ret = ReadFromDescriptor (pipeFd[0], outStr, g_totalWaitPidMilSec))) {
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Error of ReadFromDescriptor, ret code: %d,"
+			" file: %s, at line: %d\n", ret, __FILE__, __LINE__);
+#endif
 			if (!kill (pid, SIGKILL)) wait (NULL);
 			close (pipeFd[0]);
-			return -1;
+			return -3;
 		}
 		close (pipeFd[0]);
 		
-		while (waitMilSec < g_totalWaitPid / 10)
+		while (waitMilSec < g_totalWaitPidMilSec / 10)
 		{
 			if (-1 == (ret = waitpid (pid, &retStatus, WNOHANG))) {
 #ifndef NDEBUG
@@ -1110,7 +1115,7 @@ int CNetworkTask::Pipe (
 				);
 #endif
 				if (!kill (pid, SIGKILL)) wait (NULL);
-				return -1;
+				return -4;
 			} else if (ret == 0) {
 				usleep (1000 * waitMilSec);
 				waitMilSec *= 2;
@@ -1124,7 +1129,7 @@ int CNetworkTask::Pipe (
 		syslog (LOG_ERR, "Time at waitpid have elapsed, file: %s, line: %d\n", __FILE__, __LINE__);
 #endif
 		if (!kill (pid, SIGKILL)) wait (NULL);
-		return -1;
+		return -5;
 	} else // (pid == 0) // child
 	{
 		close (pipeFd[0]);
@@ -1137,7 +1142,7 @@ int CNetworkTask::Pipe (
 					" %s, at line: %d\n", StrError (ret).c_str (), ret, __FILE__, __LINE__
 			);
 #endif
-			return 1;
+			return 101;
 		}
 		
 		// stdin
@@ -1149,12 +1154,12 @@ int CNetworkTask::Pipe (
 					" %s, at line: %d\n", StrError (ret).c_str (), ret, __FILE__, __LINE__
 			);
 #endif
-			return 1;
+			return 102;
 		}
 		
 		// To check for execution by of name other user
 		if (userName != "") {
-			if (SetIdsAsUser (userName)) return -1;
+			if (SetIdsAsUser (userName)) return 103;
 		}
 		
 		char *parArr [g_maxParLen + 1];	
@@ -1167,12 +1172,12 @@ int CNetworkTask::Pipe (
 					" %s, at line: %d\n", StrError (ret).c_str (), ret, __FILE__, __LINE__
 			);
 #endif
-			return 1;
+			exit (104);
 		}
 	}
 	
 	
-	return -2;
+	return -10001;
 }
 
 
@@ -1235,17 +1240,13 @@ void* CNetworkTask::WorkerFunction () {
 	
 	assert (sock != 0);
 	
-	//
 	// mask of signals adjusting
-	//
 	if (-1 == AdjustSignals ()) {
 		close (sock);
 		return NULL;
 	}
 	
-	//
 	// To check auth information
-	//
 	if (0 > CheckAuthInfo (sock)) {
 		close (sock);
 		return NULL;
@@ -1254,9 +1255,7 @@ void* CNetworkTask::WorkerFunction () {
 	
 	assert (hloStr.length () != 0);
 	
-	//
 	// To send hello str and enter at main loop
-	//
 	DATA_HEADER hdrInf (
 		hloStr.length (),
 		DATA_HEADER::ServerRequest,
@@ -1278,6 +1277,7 @@ void* CNetworkTask::WorkerFunction () {
 				close (sock);
 				return NULL;
 			}
+			chBuf[retLen] = '\0';
 			if (0 != (ret = CheckFormatHeader (hdrInf))) {
 #ifndef NDEBUG
 				syslog (LOG_NOTICE, "CheckFormatHeader has returned: %d\n", ret);
@@ -1294,7 +1294,6 @@ void* CNetworkTask::WorkerFunction () {
 				close (sock);
 				return NULL;
 			}
-			chBuf[retLen] = '\0';
 			
 			//
 			// check command
@@ -1328,16 +1327,14 @@ void* CNetworkTask::WorkerFunction () {
 			else
 				userName = "";
 			
-			if ((ret = Pipe (parStrs, chBuf, retStatus, userName)) == -1) {
+			if ((ret = Pipe (parStrs, chBuf, retStatus, userName)) < 0) {
+#ifndef NDEBUG
+				syslog (LOG_ERR, "Error, pipe function has returned: %d, file: %s, line: %d\n", ret, __FILE__, __LINE__);
+#endif
 				strcpy (&chBuf[0], "Internal server error\n");
 				hdrInf.u.dat.cmdType = DATA_HEADER::ServerAnswer | DATA_HEADER::ServerRequest;
 				hdrInf.u.dat.retStatus = DATA_HEADER::Negative | DATA_HEADER::CanContinue;
 				hdrInf.u.dat.retExtraStatus = DATA_HEADER::InternalServerError;
-			} else if (ret == -2) {
-#ifndef NDEBUG
-				syslog (LOG_ERR, "Pipe function has returned -2, file: %s, line: %d\n", __FILE__, __LINE__);
-#endif
-				assert (1 != 1);
 			} else {
 				hdrInf.u.dat.cmdType = DATA_HEADER::ServerAnswer | DATA_HEADER::ServerRequest;
 				hdrInf.u.dat.retStatus = DATA_HEADER::Positive;

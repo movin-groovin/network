@@ -237,7 +237,7 @@ typedef struct _DATA_HEADER {
 	// Information interchange between client and server exist of 256
 	// bytes header and useful data straight after the header
 	//
-	static const int MaxDataLen = 128 * 1024 * 1024;
+	enum Constants {MaxDataLen = 128 * 1024 * 1024, MaxLenName = 47};
 	enum Cmds {ExecuteCommand = 0x0, ServerAnswer = 0x1,
 			   ServerRequest = 0x2, ClientAnswer = 0x4,
 			   ClientRequest = 0x8, CmdsSUMMARY = 0x0+0x1+0x2+0x4+0x8

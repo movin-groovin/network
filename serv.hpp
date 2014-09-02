@@ -18,6 +18,7 @@
 #include <sys/wait.h>
 #include <pwd.h>
 
+#include <boost/regex.hpp>
 
 
 //

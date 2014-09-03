@@ -19,7 +19,7 @@ endif
 
 
 target: serv.o daemonize.o
-	$(CC) $(LDFLAGS) serv.o daemonize.o -o network_server
+	$(CC) serv.o daemonize.o -o network_server $(LDFLAGS)
 	
 serv.o: serv.cpp serv.hpp
 daemonize.o: ../mon_daemon/daemonize.cpp ../mon_daemon/daemonize.hpp

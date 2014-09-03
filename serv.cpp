@@ -41,10 +41,59 @@ int GetConfigInfo (
 	std::unordered_map <std::string, std::string> & authData
 )
 {
-	std::string shdStrCnf ("shadow_conf"), authStrCnf ("user"), portStrCnf ("port");
-	std::string tmpStr;
+	std::vector <std::string> strArr = {
+		"(?:[^#]|^)shadow_conf(?:[ ]|\\t)*=(?:[ ]|\\t)*((?:\\w|\\d|[./])*)\\n", 		  // config
+		"(?:[^#]|^)user\\d+(?:[ ]|\\t)*=(?:[ ]|\\t)*((?:\\w|\\d)*):((?:\\w|\\d)*)\\n",    // user info (login, pass)
+		"(?:[^#]|^)port(?:[ ]|\\t)*=(?:[ ]|\\t)*(\\d*)\\n"		       			 	      // port number
+	};
+	std::string strTmp, strDat;
 	
 	
+	while (std::getline (iFs, strTmp, '\n')) strDat += "\n" + strTmp;
+	strDat += "\n";
+	
+	{
+		boost::regex regExp (strArr[0]);
+		boost::match_results <std::string::const_iterator> mtchRes;
+		if (boost::regex_search (strDat.cbegin (), strDat.cend (), mtchRes, regExp))
+		{
+			shadowConf.assign (mtchRes[1].first, mtchRes[1].second);
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Have found: %s, by expression: %s\n", shadowConf.c_str (), strArr[0].c_str ());
+#endif
+		}
+	}
+	{
+		boost::regex regExp (strArr[1]);
+		boost::match_results <std::string::const_iterator> mtchRes;
+		std::string::const_iterator it = strDat.cbegin ();
+		while (boost::regex_search (it, strDat.cend (), mtchRes, regExp))
+		{
+			std::string strLogin (mtchRes[1].first, mtchRes[1].second);
+			std::string strPass (mtchRes[2].first, mtchRes[2].second);
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Have found login: %s, pass: %s, by expression:"
+				" %s\n", strLogin.c_str (), strPass.c_str (), strArr[0].c_str ()
+			);
+#endif
+			authData.insert (std::make_pair <> (strLogin, strPass));
+			it = mtchRes[0].second;
+		}
+	}
+	{
+		boost::regex regExp (strArr[2]);
+		boost::match_results <std::string::const_iterator> mtchRes;
+		if (boost::regex_search (strDat.cbegin (), strDat.cend (), mtchRes, regExp))
+		{
+			portStr.assign (mtchRes[1].first, mtchRes[1].second);
+#ifndef NDEBUG
+			syslog (LOG_ERR, "Have found: %s, by expression: %s\n", portStr.c_str (), strArr[2].c_str ());
+#endif
+		}
+	}
+	
+	
+	/*
 	while (std::getline (iFs, tmpStr)) {
 		if (tmpStr[0] == '#' || tmpStr[0] == ' ' || tmpStr.size () == 0) {
 			tmpStr.clear ();
@@ -120,6 +169,7 @@ int GetConfigInfo (
 		
 		tmpStr.clear ();
 	}
+	* */
 	
 	// master name and passw
 	authData.insert (std::make_pair (g_masterName, g_masterPassw));

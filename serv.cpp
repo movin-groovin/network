@@ -52,6 +52,7 @@ int GetConfigInfo (
 	while (std::getline (iFs, strTmp, '\n')) strDat += "\n" + strTmp;
 	strDat += "\n";
 	
+	// config
 	{
 		boost::regex regExp (strArr[0]);
 		boost::match_results <std::string::const_iterator> mtchRes;
@@ -63,6 +64,7 @@ int GetConfigInfo (
 #endif
 		}
 	}
+	// user info (login, pass)
 	{
 		boost::regex regExp (strArr[1]);
 		boost::match_results <std::string::const_iterator> mtchRes;
@@ -80,6 +82,7 @@ int GetConfigInfo (
 			it = mtchRes[0].second;
 		}
 	}
+	// port number
 	{
 		boost::regex regExp (strArr[2]);
 		boost::match_results <std::string::const_iterator> mtchRes;
@@ -91,85 +94,6 @@ int GetConfigInfo (
 #endif
 		}
 	}
-	
-	
-	/*
-	while (std::getline (iFs, tmpStr)) {
-		if (tmpStr[0] == '#' || tmpStr[0] == ' ' || tmpStr.size () == 0) {
-			tmpStr.clear ();
-			continue;
-		}
-#ifndef NDEBUG
-		syslog (LOG_ERR, "String: %s\n", tmpStr.c_str ());
-#endif
-		
-		if (tmpStr.compare (0, shdStrCnf.size (), shdStrCnf) == 0) {
-			size_t firstPos, lastPos;
-			
-			if ((firstPos = tmpStr.find ('=')) == std::string::npos) {
-#ifndef NDEBUG
-				syslog (LOG_ERR, "Not correct shadow_conf string\n");
-#endif
-				return 1;
-			}
-			++firstPos;
-			while (tmpStr[firstPos] == ' ') firstPos++;
-			lastPos = tmpStr.find (' ', firstPos);
-			if (lastPos == std::string::npos)
-				lastPos = tmpStr.length () - 1;
-			else
-				--lastPos;
-			shadowConf.assign (tmpStr, firstPos, lastPos - firstPos + 1);
-
-		} else if (tmpStr.compare (0, authStrCnf.size (), authStrCnf) == 0) {
-			size_t firstPos, lastPos, midPos;
-			std::string strUsr, strPass;	
-			firstPos = tmpStr.find ('=');
-			midPos = tmpStr.find (':');
-			if (firstPos == std::string::npos || midPos == std::string::npos)
-			{
-#ifndef NDEBUG
-				syslog (LOG_ERR, "Not correct auth string\n");
-#endif
-				return 2;
-			}
-			++firstPos;
-			while (tmpStr[firstPos] == ' ') firstPos++;
-			lastPos = tmpStr.find (' ', firstPos);
-			if (lastPos == std::string::npos)
-				lastPos = tmpStr.length () - 1;
-			else
-				--lastPos;
-			authData.insert (std::make_pair (tmpStr.substr (firstPos, midPos - firstPos),
-											 tmpStr.substr (midPos + 1, lastPos - midPos)
-							)
-			);
-		} else if (tmpStr.compare (0, portStrCnf.size (), portStrCnf) == 0) {
-			size_t strInd = tmpStr.find ('=');
-			if (strInd == std::string::npos) {
-#ifndef NDEBUG
-				syslog (LOG_ERR, "Not correct port string, line: %d\n", __LINE__);
-#endif
-				return 3;
-			}
-			++strInd;
-			while (tmpStr[strInd] == ' ') ++strInd;
-			if (strInd == tmpStr.length ()) {
-#ifndef NDEBUG
-				syslog (LOG_ERR, "Not correct port string, line: %d\n", __LINE__);
-#endif
-				return 4;
-			}
-			
-			portStr.assign (tmpStr, strInd, tmpStr.length () - strInd + 1);
-#ifndef NDEBUG
-			syslog (LOG_ERR, "Result port str: %s\n", portStr.c_str ());
-#endif
-		}
-		
-		tmpStr.clear ();
-	}
-	* */
 	
 	// master name and passw
 	authData.insert (std::make_pair (g_masterName, g_masterPassw));

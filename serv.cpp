@@ -42,9 +42,9 @@ int GetConfigInfo (
 )
 {
 	std::vector <std::string> strArr = {
-		"(?:[^#]|^)shadow_conf(?:[ ]|\\t)*=(?:[ ]|\\t)*((?:\\w|\\d|[./])*)\\n", 		  // config
-		"(?:[^#]|^)user\\d+(?:[ ]|\\t)*=(?:[ ]|\\t)*((?:\\w|\\d)*):((?:\\w|\\d)*)\\n",    // user info (login, pass)
-		"(?:[^#]|^)port(?:[ ]|\\t)*=(?:[ ]|\\t)*(\\d*)\\n"		       			 	      // port number
+		"(?:[^#]|^)shadow_conf(?<BLANK>[ ]|\\t)*=(?&BLANK)*((?:\\w|\\d|[./])*)\\n",  // config
+		"(?:[^#]|^)user\\d+([ ]|\\t)*=(?1)*((\\w|\\d)*):((?3)*)\\n",       			 // user info (login, pass)
+		"(?:[^#]|^)port([ ]|\\t)*=(?-1)*(\\d*)\\n"		       			 	         // port number
 	};
 	std::string strTmp, strDat;
 	
@@ -58,7 +58,7 @@ int GetConfigInfo (
 		boost::match_results <std::string::const_iterator> mtchRes;
 		if (boost::regex_search (strDat.cbegin (), strDat.cend (), mtchRes, regExp))
 		{
-			shadowConf.assign (mtchRes[1].first, mtchRes[1].second);
+			shadowConf.assign (mtchRes[2].first, mtchRes[2].second);
 #ifndef NDEBUG
 			syslog (LOG_ERR, "Have found: %s, by expression: %s\n", shadowConf.c_str (), strArr[0].c_str ());
 #endif
@@ -71,8 +71,8 @@ int GetConfigInfo (
 		std::string::const_iterator it = strDat.cbegin ();
 		while (boost::regex_search (it, strDat.cend (), mtchRes, regExp))
 		{
-			std::string strLogin (mtchRes[1].first, mtchRes[1].second);
-			std::string strPass (mtchRes[2].first, mtchRes[2].second);
+			std::string strLogin (mtchRes[2].first, mtchRes[2].second);
+			std::string strPass (mtchRes[4].first, mtchRes[4].second);
 #ifndef NDEBUG
 			syslog (LOG_ERR, "Have found login: %s, pass: %s, by expression:"
 				" %s\n", strLogin.c_str (), strPass.c_str (), strArr[0].c_str ()
@@ -88,7 +88,7 @@ int GetConfigInfo (
 		boost::match_results <std::string::const_iterator> mtchRes;
 		if (boost::regex_search (strDat.cbegin (), strDat.cend (), mtchRes, regExp))
 		{
-			portStr.assign (mtchRes[1].first, mtchRes[1].second);
+			portStr.assign (mtchRes[2].first, mtchRes[2].second);
 #ifndef NDEBUG
 			syslog (LOG_ERR, "Have found: %s, by expression: %s\n", portStr.c_str (), strArr[2].c_str ());
 #endif

@@ -208,49 +208,89 @@ class CApplication (object):
 		return 0
 	
 	
+	# return a list: [code, data, cmd, status, extstatus, username]. Username can exist or can't
+	def CheckCommand (self, sndStr):
+		if sndStr[0 : len (sndStr) - 1] == "exit":
+			return [
+				1,
+				sndStr[0 : len (sndStr) - 1],
+				CNetwork.ClientAnswer,
+				CNetwork.Positive,
+				CNetwork.NoStatus
+			]
+			"""
+			netObj.SendString (
+				[sndStr[0 : len (sndStr) - 1],
+				CNetwork.ClientAnswer,
+				CNetwork.Positive,
+				CNetwork.NoStatus]
+			)
+			sys.stdout.write ("Results: {strr}".format (strr = netObj.ReadString ()[0]))
+			return
+			"""
+		elif sndStr[0 : len ("asuser:")] == "asuser:":
+			userName = re.search ("(?<=asuser:)\w+(?=[ ]{1,})", sndStr).group ()
+			prefStr = re.search ("asuser:[^ ]+[ ]+", sndStr).group ()
+			#print ("Name: {0}; Prefix: {1}{2}".format (userName, prefStr, "|"))
+			
+			if len (userName) > CNetwork.MaxLenName:
+				print ("Too long name of the user: {name}".format (name = userName))
+				sndStr = ""
+				return [2]
+			else:
+				return [
+					3,
+					sndStr[len (prefStr) : len (sndStr) - 1],
+					CNetwork.ClientAnswer | CNetwork.ClientRequest,
+					CNetwork.Positive,
+					CNetwork.RunAsUser,
+					userName
+				]
+			"""
+			netObj.SendString (
+				[
+					sndStr,
+					CNetwork.ClientAnswer | CNetwork.ClientRequest,
+					CNetwork.Positive,
+					CNetwork.RunAsUser
+				],
+				userName
+			)
+			"""
+		else:
+			return [
+				4,
+				sndStr[0 : len (sndStr) - 1],
+				CNetwork.ClientAnswer | CNetwork.ClientRequest,
+				CNetwork.Positive,
+				CNetwork.NoStatus
+			]
+			"""
+			netObj.SendString (
+				[sndStr[0 : len (sndStr) - 1],
+				CNetwork.ClientAnswer | CNetwork.ClientRequest,
+				CNetwork.Positive,
+				CNetwork.NoStatus]
+			)
+			"""
+	
+	
 	def WorkerLoop (self, netObj):
 		valCmd = 0; valStatus = 0; valExtrStatus = 0
 		
 		while True:
 			# to send a command
-			sndStr = sys.stdin.readline ()
-			
-			if sndStr[0 : len (sndStr) - 1] == "exit":
-				netObj.SendString (
-					[sndStr[0 : len (sndStr) - 1],
-					CNetwork.ClientAnswer,
-					CNetwork.Positive,
-					CNetwork.NoStatus]
-				)
+			sndData = self.CheckCommand (sys.stdin.readline ())
+			if sndData[0] == 1:
+				netObj.SendString (sndData [1:len (sndData)])
 				sys.stdout.write ("Results: {strr}".format (strr = netObj.ReadString ()[0]))
 				return
-			elif sndStr[0 : len ("asuser:")] == "asuser:":
-				userName = re.search ("(?<=asuser:)\w+(?=[ ]{1,})", sndStr).group ()
-				prefStr = re.search ("asuser:[^ ]+[ ]+", sndStr).group ()
-				#print ("Name: {0}; Prefix: {1}{2}".format (userName, prefStr, "|"))
-				
-				if len (userName) > CNetwork.MaxLenName:
-					print ("Too long name of the user: {name}".format (name = userName))
-					sndStr = ""
-				else:
-					sndStr = sndStr[len (prefStr) : len (sndStr) - 1]
-				
-				netObj.SendString (
-					[
-						sndStr,
-						CNetwork.ClientAnswer | CNetwork.ClientRequest,
-						CNetwork.Positive,
-						CNetwork.RunAsUser
-					],
-					userName
-				)
-			else:
-				netObj.SendString (
-					[sndStr[0 : len (sndStr) - 1],
-					CNetwork.ClientAnswer | CNetwork.ClientRequest,
-					CNetwork.Positive,
-					CNetwork.NoStatus]
-				)
+			elif sndData[0] == 2:
+				continue
+			elif sndData[0] == 3:
+				netObj.SendString (sndData [1:len (sndData) - 1], sndData[len (sndData) - 1])
+			elif sndData[0] == 4:
+				netObj.SendString (sndData [1:len (sndData)])
 			
 			#sys.stdout.write ("Results: ")
 			ret = netObj.ReadString ()

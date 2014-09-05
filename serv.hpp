@@ -185,8 +185,9 @@ public:
 	);
 	int ReadFromDescriptor (int rdFd, std::vector <char> & outStr, int waitMilSec);
 	int ParseParameters (
-		const std::vector <char> & chBuf,
-		std::vector <std::string> & parStrs
+		std::vector <char> & chBuf,
+		std::vector <std::string> & parStrs,
+		bool byBash = false
 	);
 	int SetIdsAsUser (const std::string & userName);
 };

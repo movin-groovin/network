@@ -47,6 +47,7 @@ int GetConfigInfo (
 		"(?:[^#]|^)port([ ]|\\t)*=(?-1)*(\\d*)\\n"		       			 	         // port number
 	};
 	std::string strTmp, strDat;
+	int limCnt, maxCnt = 10;
 	
 	
 	while (std::getline (iFs, strTmp, '\n')) strDat += "\n" + strTmp;
@@ -66,11 +67,13 @@ int GetConfigInfo (
 	}
 	// user info (login, pass)
 	{
+		limCnt = 0;
 		boost::regex regExp (strArr[1]);
 		boost::match_results <std::string::const_iterator> mtchRes;
 		std::string::const_iterator it = strDat.cbegin ();
 		while (boost::regex_search (it, strDat.cend (), mtchRes, regExp))
 		{
+			++limCnt;
 			std::string strLogin (mtchRes[2].first, mtchRes[2].second);
 			std::string strPass (mtchRes[4].first, mtchRes[4].second);
 #ifndef NDEBUG
@@ -78,6 +81,14 @@ int GetConfigInfo (
 				" %s\n", strLogin.c_str (), strPass.c_str (), strArr[0].c_str ()
 			);
 #endif
+			if (limCnt > maxCnt) {
+#ifndef NDEBUG
+				syslog (LOG_ERR, "Too many cycles of regex_search, "
+						"file: %s, string: %d\n",__FILE__, __LINE__);
+#endif
+				return 1;
+			}
+			
 			authData.insert (std::make_pair <> (strLogin, strPass));
 			it = mtchRes[0].second;
 		}
@@ -1156,47 +1167,46 @@ int CNetworkTask::Pipe (
 
 
 int CNetworkTask::ParseParameters (
-	const std::vector <char> & chBuf,
-	std::vector <std::string> & parStrs
+	std::vector <char> & chBuf,
+	std::vector <std::string> & parStrs,
+	bool byBash
 )
 {
-	std::string tmpStr (&chBuf[0]);
-	std::string::size_type pos1 = 0, pos2;
-	int cnt = 0;
-	
-	
-	while ((pos1 = tmpStr.find (' ', pos1)) != std::string::npos) {
-		while (tmpStr[pos1] == ' ') ++pos1;
-		++cnt;
-	}
-	if (cnt > g_maxParLen) return -1;
-	
-	pos1 = 0;
-	do {
-		while (tmpStr[pos1] == ' ' && tmpStr[pos1] != '"' && tmpStr[pos1] != '\'') ++pos1;
-		if (tmpStr[pos1] == '"')
-		{
-			if ((pos2 = tmpStr.find ('"', pos1 + 1)) == std::string::npos) pos2 = tmpStr.size ();
-			else pos2++;
-		} 
-		else if (tmpStr[pos1] == '\'')
-		{
-			if ((pos2 = tmpStr.find ('\'', pos1 + 1)) == std::string::npos) pos2 = tmpStr.size ();
-			else pos2++;
-		}
-		else
-		{
-			// if it's the last iteration we don't decrement pos2
-			if ((pos2 = tmpStr.find (' ', pos1)) == std::string::npos) pos2 = tmpStr.size ();
-		}
-		parStrs.push_back (tmpStr.substr (pos1, pos2 - pos1));
+	if (byBash) {
+		parStrs.push_back ("bash");
+		parStrs.push_back ("-c");
+		parStrs.push_back (&chBuf[0]);
+	} else {
+		boost::regex regExp ("(?:\\d|\\w|[-.()/])+(?=[ ])|\"(?:\\d|\\w|[ /\\<\\>!@#$%^&*()])+\"(?=[ ])");
+		boost::match_results <const char*> mtchRes;
+		int limCnt = 0;
 		
+		if (strlen (&chBuf[0]) == chBuf.size () - 1) chBuf.resize (chBuf.size () + 1);
+		chBuf[strlen (&chBuf[0]) + 1] = '\0';
+		chBuf[strlen (&chBuf[0])] = ' ';
+		const char *chPtr = &chBuf[0], *chEnd = &chBuf[0] + strlen (&chBuf[0]);
+		
+		while (boost::regex_search (chPtr, chEnd, mtchRes, regExp)) {
+			++limCnt;
+			
+			parStrs.push_back (std::string (mtchRes[0].first, mtchRes[0].second));
+			
+			if (limCnt > g_maxParLen) {
 #ifndef NDEBUG
-		syslog (LOG_ERR, "One substring: %s\n", tmpStr.substr (pos1, pos2 - pos1).c_str ());
+				syslog (LOG_ERR, "Too many cycles of regex_search, "
+						"file: %s, string: %d\n",__FILE__, __LINE__);
 #endif
-		
-		pos1 = pos2;
-	} while ((pos1 = tmpStr.find (' ', pos1)) != std::string::npos);
+				return -1;
+			}
+			chPtr = mtchRes[0].second;
+		}
+	}
+	
+#ifndef NDEBUG
+	syslog (LOG_NOTICE, "Parsed parameters:\n");
+	for (auto & entry : parStrs)
+		syslog (LOG_NOTICE, "parameter: %s", entry.c_str ());
+#endif
 	
 	
 	return 0;

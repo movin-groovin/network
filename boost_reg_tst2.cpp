@@ -1,5 +1,5 @@
 
-// g++ -std=c++11 boost_reg_tst2.cpp -o boost_reg_tst2 -I/usr/local/include/boost-1_54/ -L/usr/local/lib/boost1_54_0/ -lboost_regex-gcc47-mt-s-1_54
+// g++ -std=c++11 boost_reg_tst2.cpp -o boost_reg_tst2 -I/usr/local/include/boost/ -L/usr/local/lib/boost/static -lboost_regex-gcc47-mt-1_56
 
 #include <iostream>
 #include <fstream>
@@ -17,10 +17,10 @@ int main (int argc, char *argv[]) {
 		//std::string strDat ("asuser:root ps lax");
 		std::string strDat ("cmd par1 \"par2\" par3 \"par4\"");
 		//boost::regex regExp ("(?<=asuser:)\\w{1,100}");
-		std::string cmd ("(?:\\w|\\d|[\\-])+");
-		std::string spcs ("(?:\"[ ]*|\\t*\")");
-		boost::regex regExp1 ("(" + cmd + ")");
-		boost::regex regExp2 ("(" + spcs + cmd + spcs + ")|(" + cmd + ")");
+		//std::string cmd ("(?:\\w|\\d|[\\-])+");
+		//std::string spcs ("(?:\"[ ]*|\\t*\")");
+		boost::regex regExp1 ("((?:\\w|\\d|[\\-])+)");
+		boost::regex regExp2 ("\"(?>[^\"])\"");
 		boost::match_results <std::string::const_iterator> resMatch;
 		std::string::const_iterator it;
 		
@@ -29,7 +29,13 @@ int main (int argc, char *argv[]) {
 			std::cout << "Size: " << resMatch.size () << ", max size: " << resMatch.max_size () << "\n";
 			std::cout << "Result: " << std::string (resMatch[0].first, resMatch[0].second) << std::endl;
 			std::cout << "Match 1: " << std::string (resMatch[1].first, resMatch[1].second) << "\n\n";
+
 			it = resMatch[0].second;
+			while (true) {
+				char ch = *it;
+				if (ch != ' ' && ch != '\t') break;
+				else ++it;
+			}
 		}
 		else {
 			std::cout << "Matches haven't found\n";
@@ -43,6 +49,11 @@ int main (int argc, char *argv[]) {
 			std::cout << "Match 3: " << std::string (resMatch[3].first, resMatch[3].second) << std::endl;
 			
 			it = resMatch[0].second;
+			while (true) {
+				char ch = *it;
+				if (ch != ' ' && ch != '\t') break;
+				else ++it;
+			}
 		}
 		
 		std::cout << "\n\n\n";

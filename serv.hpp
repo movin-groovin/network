@@ -250,7 +250,7 @@ typedef struct _DATA_HEADER {
 	enum ExtraStatuses {NoStatus = 0, BadName = 1,
 						BadPass = 2, InternalServerError = 3,
 						TooLong = 4, InteractionFin = 5,
-						RunAsUser = 6
+						RunAsUser = 6, RunByBash = 7
 	};
 	
 	union {

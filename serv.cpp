@@ -813,7 +813,7 @@ int CNetworkTask::CommandsCheck (int sock, const std::string & cmd) {
 	// have gotten empty command
 	if (cmd.length () == 0) {
 		DATA_HEADER datInf (
-			hloStr.length (),
+			hloStr.length () + sizeof ('\n'),
 			DATA_HEADER::ServerAnswer | DATA_HEADER::ServerRequest,
 			DATA_HEADER::Negative | DATA_HEADER::CanContinue,
 			DATA_HEADER::NoStatus
@@ -1051,6 +1051,7 @@ int CNetworkTask::Pipe (
 	int ret, pid, pipeFd[2];
 	struct sigaction sigAct;
 	sigset_t sigMask;
+	std::string strErrOfExec ("Error of the command execution");
 	
 	
 	if (-1 == pipe (pipeFd)) {
@@ -1127,7 +1128,7 @@ int CNetworkTask::Pipe (
 					" %s, at line: %d\n", StrError (ret).c_str (), ret, __FILE__, __LINE__
 			);
 #endif
-			return 101;
+			exit (101);
 		}
 		
 		// stdin
@@ -1139,12 +1140,19 @@ int CNetworkTask::Pipe (
 					" %s, at line: %d\n", StrError (ret).c_str (), ret, __FILE__, __LINE__
 			);
 #endif
-			return 102;
+			exit (102);
 		}
 		
 		// To check for execution by of name other user
 		if (userName != "") {
-			if (SetIdsAsUser (userName)) return 103;
+			if (SetIdsAsUser (userName)) {
+			FILE *pFp = fdopen (1, "a");
+				if (pFp) {
+					fputs (strErrOfExec.c_str (), pFp);
+					fflush (pFp);
+				}
+				exit (103);
+			}
 		}
 		
 		char *parArr [g_maxParLen + 1];	
@@ -1157,6 +1165,11 @@ int CNetworkTask::Pipe (
 					" %s, at line: %d\n", StrError (ret).c_str (), ret, __FILE__, __LINE__
 			);
 #endif
+			FILE *pFp = fdopen (1, "a");
+			if (pFp) {
+				fputs (strErrOfExec.c_str (), pFp);
+				fflush (pFp);
+			}
 			exit (104);
 		}
 	}
@@ -1293,7 +1306,7 @@ void* CNetworkTask::WorkerFunction () {
 			}
 			
 			strErr += &chBuf[0];
-			if (-1 == ParseParameters (chBuf, parStrs)) {
+			if (-1 == ParseParameters (chBuf, parStrs, hdrInf.u.dat.retExtraStatus == DATA_HEADER::RunByBash)) {
 #ifndef NDEBUG
 				syslog (LOG_ERR, "Too many parameters have gottent at request\n");
 #endif
@@ -1370,7 +1383,7 @@ int CheckFormatHeader (DATA_HEADER & hdrInf) {
 	if (retStatus < DATA_HEADER::Positive ||
 		retStatus > DATA_HEADER::StatusesSUMMARY) return 3;
 	if (retExtraStatus < DATA_HEADER::NoStatus ||
-		retExtraStatus > DATA_HEADER::RunAsUser) return 4;
+		retExtraStatus > DATA_HEADER::RunByBash) return 4;
 	
 	return 0;
 }
@@ -1379,14 +1392,12 @@ int CheckFormatHeader (DATA_HEADER & hdrInf) {
 int CheckLogicallyHeader (DATA_HEADER & hdrInf) {
 	int lenDat, cmdType, retStatus, retExtraStatus;
 	
-	lenDat = hdrInf.u.dat.dataLen;
 	cmdType = hdrInf.u.dat.cmdType;
 	retStatus = hdrInf.u.dat.retStatus;
 	retExtraStatus = hdrInf.u.dat.retExtraStatus;
 	
-	// length check - this check need move to logically checks
-	if (lenDat > DATA_HEADER::MaxDataLen || lenDat < 0) return 1;
 	
+	hdrInf.u.dat.chName [DATA_HEADER::MaxLenName] = '\0';
 	// other checks of the fields
 	
 	return 0;

@@ -39,6 +39,7 @@ class CNetwork (object):
 	TooLong = 4
 	InteractionFin = 5
 	RunAsUser = 6
+	RunByBash = 7
 	
 	def __init__ (self, hostStr, portStr, waitSec, waitMilSec):
 		if 1 != 1:
@@ -122,6 +123,9 @@ class CNetwork (object):
 		#if __debug__:
 		#	print ("Values of header's fields: len: {0}, cmd: {1}, status: {2}, extra-"
 		#		   "status: {3}".format (lenData, cmdType, retStatus, retExtraStatus))
+		if lenData > CNetwork.MaxDataLen:
+			print ("Have received data too long: {bts} bytes".format (bts = lenData))
+			return 1
 		
 		if cmdType < CNetwork.ExecuteCommand or cmdType > CNetwork.CommandsSum:
 			print ("Not correct cmd type")
@@ -131,7 +135,7 @@ class CNetwork (object):
 			print ("Not correct ret status")
 			return 3
 		
-		if retExtraStatus < CNetwork.NoStatus or retExtraStatus > CNetwork.RunAsUser:
+		if retExtraStatus < CNetwork.NoStatus or retExtraStatus > CNetwork.RunByBash:
 			print ("Not correct ret extra status")
 			return 4
 		
@@ -142,14 +146,10 @@ class CNetwork (object):
 		# len, cmdType, status, extraStatus
 		lenData, cmdType, retStatus, retExtraStatus = hdrInternalsList
 		
-		if lenData > CNetwork.MaxDataLen:
-			#print ("Have received data too long: {bts} bytes".format (bts = lenData))
-			return 1
-		
 		if (retStatus & CNetwork.Negative) and (not (retStatus & CNetwork.CanContinue)):
 			#print ("Server has returned fatal error, we can't continue processing, status:"
 			#	   " {0}, extra-status: {1}". format (retStatus, retExtraStatus))
-			return 2
+			return 1
 		
 		return 0
 	
@@ -210,7 +210,7 @@ class CApplication (object):
 	
 	# return a list: [code, data, cmd, status, extstatus, username]. Username can exist or can't
 	def CheckCommand (self, sndStr):
-		if sndStr[0 : len (sndStr) - 1] == "exit":
+		if sndStr.rstrip ("\n") == "exit":
 			return [
 				1,
 				sndStr[0 : len (sndStr) - 1],
@@ -218,20 +218,16 @@ class CApplication (object):
 				CNetwork.Positive,
 				CNetwork.NoStatus
 			]
-			"""
-			netObj.SendString (
-				[sndStr[0 : len (sndStr) - 1],
-				CNetwork.ClientAnswer,
-				CNetwork.Positive,
-				CNetwork.NoStatus]
-			)
-			sys.stdout.write ("Results: {strr}".format (strr = netObj.ReadString ()[0]))
-			return
-			"""
+
 		elif sndStr[0 : len ("asuser:")] == "asuser:":
-			userName = re.search ("(?<=asuser:)\w+(?=[ ]{1,})", sndStr).group ()
-			prefStr = re.search ("asuser:[^ ]+[ ]+", sndStr).group ()
-			#print ("Name: {0}; Prefix: {1}{2}".format (userName, prefStr, "|"))
+			try:
+				userName = re.search ("(?:asuser:(?:[ ]|\\t)*)(\w+)(?:(?:[ ]|\\t)*)", sndStr).group (1)
+				cmdRes = re.search ("asuser:[ \\t]*(?:\\w|\\d|[-_.])+[ \\t]+([^\\s]+)[ \\t]*", sndStr)
+				sndStr = sndStr[cmdRes.start (1) : len (sndStr) - 1]
+				#print ("Name: {0}; Prefix: {1}{2}".format (userName, cmdRes.group (1), "|"))
+			except (IndexError, AttributeError) as Exc:
+				print ("Not correct command")
+				return [-1]
 			
 			if len (userName) > CNetwork.MaxLenName:
 				print ("Too long name of the user: {name}".format (name = userName))
@@ -240,39 +236,33 @@ class CApplication (object):
 			else:
 				return [
 					3,
-					sndStr[len (prefStr) : len (sndStr) - 1],
+					sndStr,
 					CNetwork.ClientAnswer | CNetwork.ClientRequest,
 					CNetwork.Positive,
 					CNetwork.RunAsUser,
 					userName
 				]
-			"""
-			netObj.SendString (
-				[
-					sndStr,
-					CNetwork.ClientAnswer | CNetwork.ClientRequest,
-					CNetwork.Positive,
-					CNetwork.RunAsUser
-				],
-				userName
-			)
-			"""
-		else:
+		elif re.match ("^bybash:", sndStr.rstrip ("\n")) != None:
+			try:
+				cmdStr = re.search ("(?:bybash:(?:[ ]|\\t)*)(.*)", sndStr.rstrip ("\n")).group (1)
+			except (IndexError, AttributeError) as Exc:
+				print ("Not correct command")
+				return [-1]
 			return [
 				4,
+				cmdStr,
+				CNetwork.ClientAnswer | CNetwork.ClientRequest,
+				CNetwork.Positive,
+				CNetwork.RunByBash
+			]
+		else:
+			return [
+				5,
 				sndStr[0 : len (sndStr) - 1],
 				CNetwork.ClientAnswer | CNetwork.ClientRequest,
 				CNetwork.Positive,
 				CNetwork.NoStatus
 			]
-			"""
-			netObj.SendString (
-				[sndStr[0 : len (sndStr) - 1],
-				CNetwork.ClientAnswer | CNetwork.ClientRequest,
-				CNetwork.Positive,
-				CNetwork.NoStatus]
-			)
-			"""
 	
 	
 	def WorkerLoop (self, netObj):
@@ -291,6 +281,11 @@ class CApplication (object):
 				netObj.SendString (sndData [1:len (sndData) - 1], sndData[len (sndData) - 1])
 			elif sndData[0] == 4:
 				netObj.SendString (sndData [1:len (sndData)])
+			elif sndData[0] == 5:
+				netObj.SendString (sndData [1:len (sndData)])
+			elif sndData[0] == -1:
+				sys.stdout.write ("Again: ")
+				continue
 			
 			#sys.stdout.write ("Results: ")
 			ret = netObj.ReadString ()
@@ -320,7 +315,7 @@ def main ():
 		return
 	applObj.WorkerLoop (netObj)
 		
-	print ("===========================================================================")
+	print ("===================================== end of session =====================================")
 	
 	
 	return
